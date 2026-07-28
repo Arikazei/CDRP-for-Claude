@@ -11,13 +11,15 @@
       "Claude Desktop"
     ]
   },
-  "token_status": {
-    "enabled": false,
-    "refresh_minutes": 5,
-    "show_scoped": true,
-    "show_plan": true,
-    "plan_override": "",
-    "plan_template": "Abonnement: {plan}"
+  "plan": {
+    "override": "",
+    "template": "Abonnement: {plan}"
+  },
+  "ui_limits": {
+    "enabled": true,
+    "age_marker_minutes": 30,
+    "max_age_minutes": 180,
+    "_hinweis": "Das modellspezifische Limit steht in keiner lokalen Datei. Es wird aus dem Nutzungsfenster abgelesen, sobald du es oeffnest, und faellt nach max_age_minutes wieder aus der Anzeige."
   },
   "activity": {
     "enabled": true,
@@ -65,10 +67,11 @@
   "local_usage": {
     "enabled": true,
     "refresh_minutes": 5,
-    "show_extra": true,
+    "show_extra": false,
     "label_5h": "5h",
     "label_week": "Woche",
-    "label_extra": "Extra"
+    "label_extra": "Extra",
+    "_hinweis_extra": "xu entspricht dem verbrauchten Nutzungsguthaben - im Nutzungsfenster steht daneben der ausgegebene Betrag in Euro. Deshalb standardmaessig aus: das geht niemanden etwas an."
   },
   "cowork_beacon": {
     "enabled": true,
@@ -77,11 +80,6 @@
     "max_age_hard_hours": 12,
     "label": "using cowork",
     "fallback_text": "using Claude Desktop"
-  },
-  "usage_hint": {
-    "enabled": true,
-    "pattern": "max",
-    "text": ""
   },
   "state_line": {
     "mode": "alternate",

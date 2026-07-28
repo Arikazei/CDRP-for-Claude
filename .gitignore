@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 claude_rpc.log
 cowork_status.json
+ui_limits.json
 
 # Persoenliche Konfiguration - Vorlage ist config.example.json
 config.json

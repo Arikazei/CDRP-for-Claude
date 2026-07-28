@@ -20,9 +20,6 @@ from pathlib import Path
 
 import re
 
-import urllib.error
-import urllib.request
-
 from pypresence import Presence
 
 try:
@@ -124,28 +121,6 @@ def load_config():
         return json.load(f)
 
 
-def http_get_json(url, token, timeout=10):
-    """GET mit Bearer-Token, nur mit der Standardbibliothek.
-
-    Ersatz fuer requests: dessen Abhaengigkeit charset-normalizer bringt
-    eine kompilierte Erweiterung mit, und das Bundle soll ohne fremde
-    Binaerdateien auskommen. Rueckgabe: (HTTP-Status, Daten); Status 0
-    steht fuer einen Netzwerkfehler.
-    """
-    request = urllib.request.Request(url, headers={
-        "Authorization": "Bearer %s" % token,
-        "anthropic-beta": "oauth-2025-04-20",
-        "Accept": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, None
-    except Exception as exc:
-        logging.warning("HTTP-Aufruf fehlgeschlagen: %s", exc)
-        return 0, None
-
 
 def idle_seconds():
     """Sekunden seit letzter Tastatur-/Mauseingabe (systemweit)."""
@@ -210,132 +185,6 @@ def claude_running(process_names):
             return True
     return False
 
-
-class TokenStatus:
-    """Modul: 5h-/Wochen-Auslastung via Claude-Code-OAuth-Endpoint."""
-
-    URL = "https://api.anthropic.com/api/oauth/usage"
-
-    def __init__(self, cfg):
-        self.cfg = cfg or {}
-        self.text = None
-        self.next_refresh = 0.0
-        self.ok = False
-        self._plan = None
-        self._plan_refresh = 0.0
-
-    def plan(self):
-        """Abo-Variante (z. B. "Max 5x") live vom Profil-Endpoint."""
-        if not self.cfg.get("show_plan"):
-            return None
-        if not self.cfg.get("enabled"):
-            # Modul aus: kein Zugriff auf .credentials.json, kein API-Aufruf.
-            return self.cfg.get("plan_override") or None
-        now = time.time()
-        if now >= self._plan_refresh:
-            self._plan_refresh = now + 12 * 3600
-            self._plan = (
-                self.cfg.get("plan_override")
-                or self._fetch_plan()
-                or self._plan
-            )
-        return self._plan or None
-
-    def _fetch_plan(self):
-        try:
-            creds_path = Path.home() / ".claude" / ".credentials.json"
-            creds = json.loads(creds_path.read_text(encoding="utf-8"))
-            token = creds.get("claudeAiOauth", {}).get("accessToken")
-            if not token:
-                return None
-            status, data = http_get_json(
-                "https://api.anthropic.com/api/oauth/profile", token
-            )
-            if status != 200 or data is None:
-                logging.warning("Profil-Endpoint: HTTP %s", status)
-                return None
-            blob = json.dumps(data)
-            match = re.search(r"max_(\d+)x", blob)
-            if match:
-                return f"Max {match.group(1)}x"
-            if "claude_max" in blob:
-                return "Max"
-            if "claude_pro" in blob:
-                return "Pro"
-            sub = creds.get("claudeAiOauth", {}).get("subscriptionType") or ""
-            return sub.capitalize() if sub else None
-        except Exception as exc:
-            logging.warning("Plan-Abfrage fehlgeschlagen: %s", exc)
-            return None
-
-    def get(self):
-        if not self.cfg.get("enabled"):
-            return None
-        now = time.time()
-        if now >= self.next_refresh:
-            self.text = self._fetch()
-            interval = self.cfg.get("refresh_minutes", 5) * 60
-            if not self.ok:
-                interval = min(interval, 180)
-            self.next_refresh = now + interval
-        return self.text
-
-    def _fetch(self):
-        self.ok = False
-        try:
-            creds_path = Path.home() / ".claude" / ".credentials.json"
-            creds = json.loads(creds_path.read_text(encoding="utf-8"))
-            token = creds.get("claudeAiOauth", {}).get("accessToken")
-            if not token:
-                return None
-            status, data = http_get_json(self.URL, token)
-            if status != 200 or data is None:
-                logging.warning("Usage-Endpoint: HTTP %s", status)
-                return self.text
-            parts = []
-            for lim in data.get("limits") or []:
-                pct = lim.get("percent")
-                if not isinstance(pct, (int, float)):
-                    continue
-                kind = lim.get("kind")
-                if kind == "session":
-                    parts.append(f"5h {pct:.0f}%")
-                elif kind == "weekly_all":
-                    parts.append(f"Woche {pct:.0f}%")
-                elif kind == "weekly_scoped" and self.cfg.get("show_scoped", True):
-                    scope = (lim.get("scope") or {}).get("model") or {}
-                    name = scope.get("display_name") or "Modell"
-                    parts.append(f"{name} {pct:.0f}%")
-            if not parts:
-                five = self._utilization(data, ["five_hour"])
-                week = self._utilization(
-                    data, ["seven_day", "seven_day_overall", "weekly"]
-                )
-                if five is not None:
-                    parts.append(f"5h: {five:.0f}%")
-                if week is not None:
-                    parts.append(f"Woche: {week:.0f}%")
-            if self.cfg.get("show_plan") and parts and (
-                self.cfg.get("plan_position", "info") == "tokens"
-            ):
-                plan = self.plan()
-                if plan:
-                    parts.insert(0, plan)
-            self.ok = True
-            return " · ".join(parts) if parts else None
-        except Exception as exc:
-            logging.warning("Token-Status fehlgeschlagen: %s", exc)
-            return self.text
-
-    @staticmethod
-    def _utilization(data, keys):
-        for key in keys:
-            value = data.get(key)
-            if isinstance(value, dict):
-                util = value.get("utilization")
-                if isinstance(util, (int, float)):
-                    return float(util)
-        return None
 
 
 class SessionInfo:
@@ -703,6 +552,7 @@ class UIWatcher:
                     composer_at = index
             if models:
                 out["model"] = models[-1]
+            out.update(self._read_limits(nodes))
 
             # Die Statuszeile steht unmittelbar ueber dem Eingabefeld. Ohne
             # diesen Anker wuerde auch Text aus dem Chatverlauf passen -- ein
@@ -727,6 +577,157 @@ class UIWatcher:
         except Exception as exc:
             logging.warning("UI-Watcher fehlgeschlagen: %s", exc)
             return {}
+
+    # Im Nutzungsfenster traegt jede Fortschrittsleiste den Namen ihres
+    # Limits, der Prozentwert steht im naechsten Textknoten:
+    #   ProgressBar "Fable"  ->  Text "99 % verwendet"
+    # Bewusst eine Positivliste: im selben Fenster stehen auch das
+    # Nutzungsguthaben und der ausgegebene Betrag in Euro. Was nicht
+    # ausdruecklich erlaubt ist, faellt durch -- auch kuenftige Balken.
+    LIMIT_LABELS = (
+        (r"^(aktuelle sitzung|current session)", "5h"),
+        (r"^(alle modelle|all models)", "Woche"),
+        (r"^(fable|opus|sonnet|haiku)\b", None),
+    )
+    PLAN_RE = re.compile(
+        r"^(Max|Pro|Team|Enterprise|Free)\s*(?:\(\s*(\d+)\s*x\s*\))?$", re.I
+    )
+
+    def _read_limits(self, nodes):
+        out = {}
+        limits = {}
+        plan = None
+        for index, (kind, name) in enumerate(nodes):
+            if kind == "TextControl":
+                match = self.PLAN_RE.match(name)
+                if match:
+                    plan = match.group(1).capitalize()
+                    if match.group(2):
+                        plan += " %sx" % match.group(2)
+                continue
+            if kind != "ProgressBarControl":
+                continue
+            label = None
+            for pattern, fixed in self.LIMIT_LABELS:
+                if re.match(pattern, name.strip(), re.I):
+                    label = fixed or name.strip()
+                    break
+            if label is None:
+                continue
+            for follow_kind, follow_name in nodes[index + 1: index + 4]:
+                if follow_kind != "TextControl":
+                    continue
+                percent = re.search(r"(\d{1,3})\s*%", follow_name)
+                if percent:
+                    limits[label] = int(percent.group(1))
+                    break
+        if limits:
+            out["limits"] = limits
+            # Die Abo-Stufe wird nur uebernommen, wenn im selben Durchlauf
+            # auch Limit-Balken gefunden wurden. Ein blosses "Max" irgendwo
+            # im Chatverlauf ist sonst schon ein Treffer.
+            if plan:
+                out["plan"] = plan
+        return out
+
+
+class LimitStore:
+    """Merkt sich die im Nutzungsfenster abgelesenen Limits samt Alter.
+
+    Das modellspezifische Wochenlimit steht lokal in keiner Datei -- es ist
+    nur sichtbar, solange das Nutzungsfenster offen ist. Der Wert wird
+    deshalb beim Vorbeikommen eingesammelt, mit Zeitstempel abgelegt und
+    altert danach: erst mit Vermerk, dann gar nicht mehr.
+    """
+
+    def __init__(self, cfg):
+        self.cfg = cfg or {}
+        self.path = DATA_DIR / "ui_limits.json"
+        self.data = {}
+        self._last_save = 0.0
+        self._load()
+
+    def _load(self):
+        try:
+            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:
+            self.data = {}
+
+    def _save(self):
+        try:
+            self.path.write_text(
+                json.dumps(self.data, ensure_ascii=False), encoding="utf-8"
+            )
+        except OSError as exc:
+            logging.warning("Limit-Speicher nicht schreibbar: %s", exc)
+
+    def update(self, scan):
+        """Neue Ablesungen uebernehmen.
+
+        Solange das Nutzungsfenster offen ist, laeuft der Scan alle paar
+        Sekunden durch. Geschrieben wird trotzdem nur bei einer echten
+        Aenderung oder hoechstens minuetlich, damit die Platte Ruhe hat.
+        """
+        now = time.time()
+        important = False
+        touched = False
+        for label, percent in (scan.get("limits") or {}).items():
+            entry = self.data.get(label)
+            if not isinstance(entry, dict) or entry.get("percent") != percent:
+                self.data[label] = {"percent": percent, "seen": now}
+                important = True
+            else:
+                entry["seen"] = now
+                touched = True
+        if scan.get("plan") and self.data.get("plan") != scan["plan"]:
+            self.data["plan"] = scan["plan"]
+            important = True
+        if important or (touched and now - self._last_save > 60):
+            self._last_save = now
+            self._save()
+
+    def plan(self):
+        return self.data.get("plan")
+
+    def model_limit(self):
+        """Text fuer das modellspezifische Limit, oder None wenn zu alt."""
+        if not self.cfg.get("enabled", True):
+            return None
+        max_age = self.cfg.get("max_age_minutes", 180) * 60
+        mark_age = self.cfg.get("age_marker_minutes", 30) * 60
+        best = None
+        for label, entry in self.data.items():
+            if label in ("5h", "Woche", "plan") or not isinstance(entry, dict):
+                continue
+            if best is None or entry.get("seen", 0) > best[1].get("seen", 0):
+                best = (label, entry)
+        if best is None:
+            return None
+        label, entry = best
+        age = time.time() - entry.get("seen", 0)
+        if age > max_age:
+            return None
+        text = "%s %d%%" % (label, entry.get("percent", 0))
+        if age > mark_age:
+            text += self._age_suffix(age)
+        return text
+
+    @staticmethod
+    def _age_suffix(age):
+        if age < 3600:
+            return " (vor %d min)" % round(age / 60)
+        return " (vor %d h)" % round(age / 3600)
+
+    def status(self):
+        """Alter aller bekannten Limits, fuer das Werkzeug presence_status."""
+        out = {}
+        for label, entry in self.data.items():
+            if isinstance(entry, dict):
+                out[label] = {
+                    "percent": entry.get("percent"),
+                    "alter_minuten": round((time.time() - entry.get("seen", 0)) / 60),
+                }
+        return out
 
 
 class ToolHistoryWatcher:
@@ -995,8 +996,8 @@ def main():
     poll = cfg.get("poll_interval_seconds", 5)
     open_pool = (cfg.get("texts", {}).get("open")) or ["Claude Desktop"]
 
-    tokens = TokenStatus(cfg.get("token_status"))
     local_usage = LocalUsageWatcher(cfg.get("local_usage"))
+    limits = LimitStore(cfg.get("ui_limits"))
     session = SessionInfo(cfg.get("session_info"))
     beacon = CoworkBeacon(cfg.get("cowork_beacon"))
     activity = ActivityWatcher(cfg.get("activity"))
@@ -1011,22 +1012,11 @@ def main():
     )
     presence = RichPresence(client_id)
 
-    # Pro-Konten haben nur das 5-Stunden- und das Wochenlimit, und beide
-    # stehen lokal zur Verfuegung. Max-Konten haben zusaetzlich ein
-    # modellspezifisches Limit, das ausschliesslich der API-Endpunkt kennt.
-    # Welches Abo vorliegt, ist lokal nirgends hinterlegt (geprueft), deshalb
-    # richtet sich der Hinweis nach der angegebenen Abo-Bezeichnung.
-    hint_cfg = cfg.get("usage_hint") or {}
-    usage_hint = None
-    if hint_cfg.get("enabled", True) and not (cfg.get("token_status") or {}).get("enabled"):
-        label = (cfg.get("token_status") or {}).get("plan_override") or ""
-        if re.search(hint_cfg.get("pattern", r"max"), label, re.I):
-            usage_hint = hint_cfg.get("text") or (
-                "Abo '%s' erkannt: die Anzeige zeigt nur das 5-Stunden- und das "
-                "Wochenlimit. Das modellspezifische Limit gibt es nur ueber die "
-                "API-Option - siehe Warnhinweis in der README." % label
-            )
-            logging.info(usage_hint)
+    # Die Abo-Stufe steht im Nutzungsfenster ("Max (5x)") und wird von dort
+    # uebernommen. plan_override greift, solange sie noch nie gesehen wurde.
+    plan_cfg = cfg.get("plan") or {}
+    plan_override = plan_cfg.get("override") or ""
+    plan_template = plan_cfg.get("template", "Abonnement: {plan}")
 
     session_start = None
     last_active = 0.0
@@ -1064,7 +1054,9 @@ def main():
                 session_start = int(now)
 
             state_parts = []
-            ui.refresh()
+            # Der Scan laeuft ohnehin -- steht das Nutzungsfenster gerade
+            # offen, werden die Limits im Vorbeigehen mitgenommen.
+            limits.update(ui.refresh())
             # Die Oberflaeche meldet nur "<Server> wird verwendet" -- welches
             # Werkzeug gerade laeuft, steht ausschliesslich im Verlauf von
             # Desktop Commander. Sind beide frisch, gewinnt die genauere
@@ -1092,17 +1084,16 @@ def main():
             # werden, ohne dass etwas uebersehen wird.
             if info_text:
                 state_parts.append(info_text)
-            # TokenStatus kennt zusaetzlich das modellspezifische Limit, das
-            # lokal nirgends abgelegt ist; deshalb hat es Vorrang, wenn aktiv.
-            token_text = tokens.get() or local_usage.get()
+            # 5h und Woche stehen frisch in der lokalen Datei der App. Das
+            # modellspezifische Limit gibt es dort nicht -- es kommt aus dem
+            # Nutzungsfenster und altert, bis es ganz herausfaellt.
+            usage_parts = [p for p in (local_usage.get(), limits.model_limit()) if p]
+            token_text = " · ".join(usage_parts) or None
             if token_text:
                 state_parts.append(token_text)
-            plan_text = tokens.plan()
+            plan_text = limits.plan() or plan_override
             if plan_text:
-                template = (cfg.get("token_status") or {}).get(
-                    "plan_template", "Abonnement: {plan}"
-                )
-                state_parts.append(template.replace("{plan}", plan_text))
+                state_parts.append(plan_template.replace("{plan}", plan_text))
             if state_parts:
                 sl = cfg.get("state_line", {})
                 if sl.get("mode", "alternate") == "alternate" and len(state_parts) > 1:
@@ -1131,7 +1122,7 @@ def main():
                 "usage": token_text,
                 "active": currently_active,
                 "paused": _PAUSED,
-                "hinweis": usage_hint,
+                "limits": limits.status(),
             })
         except Exception as exc:
             logging.warning("Hauptschleife: %s", exc)

@@ -104,31 +104,60 @@ früheren Beacon-Umweg für Sessions, die auf dem eigenen Rechner laufen.
 ### LocalUsageWatcher
 
 `%APPDATA%\Claude\plan-usage-history.json` schreibt die App alle 5 Minuten:
-`fh` = 5-Stunden-Fenster, `sd` = 7-Tage-Fenster, `xu` = Zusatzkontingent,
-jeweils in Prozent. `xu` schreibt die App nur zeitweise und wird deshalb nur
-innerhalb von `extra_max_age_minutes` (60) relativ zur letzten Stichprobe
-übernommen — ein Wert von vor Tagen wäre schlicht falsch.
+`fh` = 5-Stunden-Fenster, `sd` = 7-Tage-Fenster, `xu` = Nutzungsguthaben,
+jeweils in Prozent. Beide erstgenannten sind immer aktuell und bilden die
+Grundlage der Auslastungsanzeige.
 
-Ein modellspezifisches Wochenlimit steht dort **nicht**. Ebenso wenig die
-Abo-Stufe: weder Logs noch Caches enthalten sie (geprüft). Deshalb ist
-`plan_override` ein freies Textfeld, und `usage_hint` weist Max-Nutzer darauf
-hin, dass ihnen ohne die API-Option ein Limit fehlt.
+**`xu` ist standardmäßig aus.** Der Wert entspricht dem Balken
+*Nutzungsguthaben* im Nutzungsfenster — daneben steht dort der ausgegebene
+Betrag in Euro. Eine Prozentzahl über das eigene Geld gehört nicht in ein
+öffentliches Profil. Wer es trotzdem will, setzt `show_extra`.
 
-### TokenStatus — optional, standardmäßig aus
+Ein modellspezifisches Wochenlimit steht in dieser Datei **nicht**, siehe
+`LimitStore`.
 
-`GET /api/oauth/usage` und `/api/oauth/profile` mit dem Token aus
-`~/.claude/.credentials.json`, Header `anthropic-beta: oauth-2025-04-20`,
-Aktualisierung alle 5 Minuten (nach Fehlern 3). Bei 401/429 bleibt der letzte
-Wert stehen. Liefert als Einziges das modellspezifische Limit.
+### LimitStore — das modellspezifische Limit
 
-Anthropic untersagt seit Februar 2026 die Nutzung von Abo-OAuth-Token in
-Drittanwendungen. Das Modul ist deshalb aus, wird beim Bauen des Pakets
-zwangsweise auf `false` gesetzt, und `plan()` rührt bei ausgeschaltetem Modul
-weder Datei noch Endpunkt an.
+Es gibt keine lokale Datei mit diesem Wert. Geprüft wurde der gesamte
+`%APPDATA%\Claude`-Baum: 34 Dateien enthalten die Feldnamen `five_hour`,
+`seven_day_opus` und so weiter, aber alle davon sind Programmcode — der
+V8-Bytecode-Cache des JS-Bundles und ein Plugin mit hartkodierten
+Schwellwerten. Kontowerte stehen nirgends. Sie leben ausschließlich im
+Arbeitsspeicher des Renderers.
 
-Die Datei `.credentials.json` wird ausschließlich gelesen, nie geschrieben.
-Das Token lebt etwa einen Tag; `token_ping.vbs` hält es per Aufgabenplanung
-frisch, sofern das Modul überhaupt genutzt wird.
+Also wird abgelesen, was ohnehin auf dem Bildschirm steht. Im Nutzungsfenster
+trägt jede Fortschrittsleiste den Namen ihres Limits, der Prozentwert steht im
+nächsten Textknoten:
+
+```
+ProgressBar "Fable"  →  Text "99 % verwendet"
+Text "Max (5x)"      →  Abo-Stufe
+```
+
+Der `UIWatcher` sammelt das im selben Durchlauf mit, den er ohnehin macht —
+Mehrkosten also null. `LimitStore` legt die Werte mit Zeitstempel in
+`ui_limits.json` ab und schreibt nur bei echter Änderung oder höchstens
+minütlich.
+
+**Positivliste statt Ausschluss.** Im selben Fenster stehen das
+Nutzungsguthaben und der ausgegebene Betrag in Euro. Übernommen werden nur
+Balken, die auf `Aktuelle Sitzung`, `Alle Modelle` oder einen Modellnamen
+passen; alles andere fällt durch, auch künftige Balken. Geld gehört nicht in
+eine öffentlich sichtbare Presence.
+
+**Alterung.** Bis `age_marker_minutes` (30) wird der Wert nackt angezeigt,
+danach mit Vermerk („Fable 99 % (vor 2 h)"), nach `max_age_minutes` (180)
+verschwindet er. Eine falsche Zahl ist schlechter als keine.
+
+Die Abo-Stufe wird nur übernommen, wenn im selben Durchlauf auch Limit-Balken
+gefunden wurden — sonst genügt ein „Max" irgendwo im Chatverlauf als Treffer.
+Das ist beim Testen tatsächlich passiert.
+
+Ein früheres Modul hat diese Werte über `GET /api/oauth/usage` mit dem Token
+aus `.credentials.json` geholt. Das ist ersatzlos entfernt: Anthropic
+untersagt seit Februar 2026 die Verwendung von Abo-OAuth-Token in
+Drittanwendungen, und die Formulierung unterscheidet nicht zwischen Lesen und
+Schreiben — ein GET ist ebenso Verwendung.
 
 ### SessionInfo, CoworkBeacon, ActivityWatcher
 

@@ -19,9 +19,9 @@
       "args": ["${__dirname}/server/main.py"],
       "env": {
         "CLAUDE_RPC_CLIENT_ID": "${user_config.client_id}",
-        "CLAUDE_RPC_USE_API": "${user_config.use_api_usage}",
         "CLAUDE_RPC_IDLE_MINUTES": "${user_config.idle_timeout_minutes}",
         "CLAUDE_RPC_PLAN": "${user_config.plan_label}",
+        "CLAUDE_RPC_LIMIT_MAX_AGE": "${user_config.limit_max_age_minutes}",
         "CLAUDE_RPC_IDLE_TEXT": "${user_config.idle_text}",
         "PYTHONUTF8": "1"
       }
@@ -57,17 +57,19 @@
       "max": 240,
       "required": false
     },
-    "use_api_usage": {
-      "type": "boolean",
-      "title": "Auslastung ueber die Anthropic-API abfragen",
-      "description": "AUS: Prozentwerte fuer 5 Stunden und Woche kommen aus der lokalen Datei der Claude-App. AN: zusaetzlich das modellspezifische Limit, dafuer wird aber dein Anmelde-Token aus .credentials.json gelesen und an einen Anthropic-Endpunkt geschickt. Anthropic untersagt die Nutzung von Abo-Token in Drittanwendungen - einschalten auf eigenes Risiko.",
-      "default": false,
+    "limit_max_age_minutes": {
+      "type": "number",
+      "title": "Modell-Limit ausblenden nach (Minuten)",
+      "description": "Das modellspezifische Wochenlimit steht in keiner lokalen Datei. Es wird abgelesen, sobald du das Nutzungsfenster von Claude oeffnest, und bekommt danach einen Altersvermerk. Ist es aelter als hier eingestellt, verschwindet es aus der Anzeige, statt eine veraltete Zahl zu zeigen.",
+      "default": 180,
+      "min": 15,
+      "max": 1440,
       "required": false
     },
     "plan_label": {
       "type": "string",
       "title": "Abo-Bezeichnung",
-      "description": "Frei waehlbarer Text, der als eigenes Segment rotiert, zum Beispiel 'Pro' oder 'Max 5x'. Bei einem Max-Abo weist das Werkzeug presence_status darauf hin, dass das modellspezifische Limit nur ueber die API-Option sichtbar wird. Leer lassen zum Ausblenden.",
+      "description": "Wird normalerweise selbst aus dem Nutzungsfenster gelesen ('Max (5x)'). Dieser Text greift, solange das noch nie geoeffnet wurde. Leer lassen zum Ausblenden.",
       "default": "",
       "required": false
     },

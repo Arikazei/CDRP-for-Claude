@@ -18,13 +18,9 @@ with open(SOURCE, encoding="utf-8") as handle:
 # aus dieser Anwendung. Eine eigene ID im Einstellungsdialog ueberschreibt sie.
 DEFAULT_CLIENT_ID = "1529478569636659372"
 
-cfg.pop("_token_status_hinweis", None)
 cfg["client_id"] = DEFAULT_CLIENT_ID
 cfg["buttons"] = []
-cfg.setdefault("token_status", {}).update({
-    "enabled": False,
-    "plan_override": "",
-})
+cfg.setdefault("plan", {})["override"] = ""
 cfg.setdefault("local_usage", {})["enabled"] = True
 
 EXAMPLE = os.path.join(os.path.dirname(HERE), "config.example.json")

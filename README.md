@@ -33,8 +33,8 @@ gibt es weder eine SmartScreen-Warnung noch typische Virenscanner-Fehlalarme.
 |---|---|
 | Discord Application ID | optional — leer lassen für die mitgelieferte Anwendung |
 | Presence ausblenden nach | Minuten ohne Eingabe, bis die Presence verschwindet |
-| Auslastung über die Anthropic-API | siehe Warnhinweis unten, Standard aus |
-| Abo-Bezeichnung | z. B. „Pro" oder „Max 5x", erscheint als „Abonnement: Max 5x" |
+| Modell-Limit ausblenden nach | Minuten, bis ein abgelesener Wert als veraltet gilt |
+| Abo-Bezeichnung | Notnagel; normalerweise liest sich das selbst aus |
 | Text im Leerlauf | erste Zeile, solange kein Chat im Vordergrund ist |
 
 Discord zeigt zwei Zeilen, aufgeteilt nach Tempo. Die **erste** zeigt ohne
@@ -57,7 +57,9 @@ an Discord gehen (Statustext, Modell/Aktivität, Auslastung in Prozent):
   ausschließlich das Feld `toolName`. Argumente und Ausgaben stehen in
   derselben Datei und werden bewusst ignoriert.
 - **Claude Desktop**: Sitzungsdateien lokaler Cowork-Sessions und die
-  Nutzungsdatei `plan-usage-history.json`.
+  Nutzungsdatei `plan-usage-history.json`. Aus dem Nutzungsfenster werden nur
+  Sitzungs-, Wochen- und Modell-Limits übernommen — der Balken für das
+  Nutzungsguthaben und der ausgegebene Betrag bleiben ausdrücklich außen vor.
 - Systemweit nur: läuft `claude.exe`, ist es im Vordergrund, wann war die
   letzte Eingabe. Zeitstempel und Fenstername, keine Inhalte.
 
@@ -65,21 +67,22 @@ an Discord gehen (Statustext, Modell/Aktivität, Auslastung in Prozent):
 keinen Schalter braucht. Was nicht gelesen wird, kann auch nicht versehentlich
 im Profil landen.
 
-## Warnhinweis zur API-Option
+## Woher die Auslastung kommt
 
-Mit *„Auslastung über die Anthropic-API"* liest das Programm dein
-Anmelde-Token aus `~/.claude/.credentials.json` und ruft damit einen
-Anthropic-Endpunkt auf. Das liefert zusätzlich das modellspezifische Limit,
-das lokal nirgends abgelegt ist.
+5-Stunden- und Wochenwert stehen in einer Datei, die Claude Desktop selbst
+alle fünf Minuten fortschreibt — die sind immer aktuell.
 
-Anthropic untersagt seit Februar 2026 ausdrücklich, OAuth-Token von Free-,
-Pro- oder Max-Konten in anderen Produkten, Werkzeugen oder Diensten zu
-verwenden, und behält sich Maßnahmen ohne Vorankündigung vor. Die Option ist
-deshalb standardmäßig aus. Ob du sie einschaltest, ist deine Entscheidung und
-dein Risiko.
+Das modellspezifische Wochenlimit steht dort **nicht**. Es existiert lokal
+nur, solange du das Nutzungsfenster von Claude geöffnet hast. Genau dann liest
+das Programm es im Vorbeigehen mit und merkt es sich mit Zeitstempel: bis
+30 Minuten ohne Vermerk, danach mit Altersangabe („Fable 99 % (vor 2 h)"),
+nach drei Stunden verschwindet es. Lieber keine Zahl als eine falsche.
 
-Ohne die Option kommen 5-Stunden- und Wochenwert aus der lokalen Datei der
-Claude-App — dafür wird kein Token angefasst und kein Endpunkt aufgerufen.
+**Es wird kein Anmelde-Token gelesen und kein Anthropic-Endpunkt aufgerufen.**
+Anthropic untersagt seit Februar 2026 die Verwendung von OAuth-Token aus
+Free-, Pro- oder Max-Konten in anderen Produkten; dieses Projekt hält sich
+davon vollständig fern und liest ausschließlich, was auf deinem Bildschirm
+und auf deiner Platte ohnehin steht.
 
 ## Entwicklung
 

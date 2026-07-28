@@ -54,11 +54,12 @@ def build_config():
 
     cfg["idle_timeout_minutes"] = env_int("CLAUDE_RPC_IDLE_MINUTES", 25)
 
-    use_api = env_flag("CLAUDE_RPC_USE_API", False)
-    cfg.setdefault("token_status", {})["enabled"] = use_api
     plan = (os.environ.get("CLAUDE_RPC_PLAN") or "").strip()
-    cfg["token_status"]["plan_override"] = plan
-    cfg["token_status"]["show_plan"] = bool(plan) or use_api
+    cfg.setdefault("plan", {})["override"] = plan
+
+    cfg.setdefault("ui_limits", {})["max_age_minutes"] = env_int(
+        "CLAUDE_RPC_LIMIT_MAX_AGE", 180
+    )
 
     idle = (os.environ.get("CLAUDE_RPC_IDLE_TEXT") or "").strip()
     if idle:
