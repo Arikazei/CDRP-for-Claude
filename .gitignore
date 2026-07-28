@@ -1,0 +1,24 @@
+# Laufzeit und lokale Umgebung
+.venv/
+__pycache__/
+*.pyc
+claude_rpc.log
+cowork_status.json
+
+# Persoenliche Konfiguration - Vorlage ist config.example.json
+config.json
+config.local.json
+
+# Persoenliche Projektnotizen (Rechnername, Pfade, eigene App-ID)
+PROJEKT.md
+
+# Build-Artefakte des MCPB-Pakets
+build/
+dist/
+.cache/
+mcpb/server/config.default.json
+
+# Testreste
+_probe*.py
+_mcp_test.py
+_check.py

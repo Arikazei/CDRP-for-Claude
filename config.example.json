@@ -1,0 +1,95 @@
+{
+  "client_id": "1529478569636659372",
+  "process_names": [
+    "claude.exe"
+  ],
+  "idle_timeout_minutes": 25,
+  "active_input_threshold_seconds": 90,
+  "poll_interval_seconds": 5,
+  "texts": {
+    "open": [
+      "Claude Desktop"
+    ]
+  },
+  "token_status": {
+    "enabled": false,
+    "refresh_minutes": 5,
+    "show_scoped": true,
+    "show_plan": true,
+    "plan_override": "",
+    "plan_template": "Abonnement: {plan}"
+  },
+  "activity": {
+    "enabled": true,
+    "fresh_seconds": 15,
+    "working_text": "Claude arbeitet gerade...",
+    "tool_template": "Claude is using {tool}"
+  },
+  "session_info": {
+    "enabled": true,
+    "show_project": false,
+    "show_model": true,
+    "max_age_minutes": 10,
+    "refresh_seconds": 30,
+    "code_template": "using code with {model}"
+  },
+  "ui_model": {
+    "enabled": false,
+    "refresh_seconds": 10,
+    "template": "using cowork with {model}"
+  },
+  "ui_watcher": {
+    "enabled": true,
+    "refresh_seconds": 8,
+    "max_nodes": 3000,
+    "template": "using cowork with {model}",
+    "busy_text": "Claude arbeitet gerade...",
+    "require_busy": true,
+    "status_lookback": 12,
+    "tool_status_pattern": "(wird verwendet|is using)",
+    "composer_pattern": "(Anfrage an Claude|Nachricht|Message Claude|Reply to Claude)"
+  },
+  "tool_history": {
+    "enabled": true,
+    "fresh_seconds": 25,
+    "template": "Desktop Commander: {tool}",
+    "_hinweis": "{tool} = roher Werkzeugname (read_file, edit_block ...). Alternativ {action} fuer die ausformulierte Variante aus DEFAULT_LABELS."
+  },
+  "local_session": {
+    "enabled": true,
+    "refresh_seconds": 15,
+    "max_age_minutes": 30,
+    "show_model": true,
+    "label": "using cowork"
+  },
+  "local_usage": {
+    "enabled": true,
+    "refresh_minutes": 5,
+    "show_extra": true,
+    "label_5h": "5h",
+    "label_week": "Woche",
+    "label_extra": "Extra"
+  },
+  "cowork_beacon": {
+    "enabled": true,
+    "show_model": true,
+    "max_age_minutes": 60,
+    "max_age_hard_hours": 12,
+    "label": "using cowork",
+    "fallback_text": "using Claude Desktop"
+  },
+  "usage_hint": {
+    "enabled": true,
+    "pattern": "max",
+    "text": ""
+  },
+  "state_line": {
+    "mode": "alternate",
+    "alternate_seconds": 20
+  },
+  "large_image_key": "logo",
+  "large_image_text": "Claude Desktop",
+  "small_image_key_active": "",
+  "small_image_key_open": "",
+  "buttons": []
+}
