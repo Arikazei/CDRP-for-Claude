@@ -11,19 +11,22 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 
 
 def running():
-    """Laufende Daemon-Prozesse.
+    """Laufende Daemon-Prozesse, erkannt an der Befehlszeile.
 
-    Nur pythonw (der Daemon laeuft fensterlos) und nie der eigene Prozess --
-    sonst beendet dieses Skript sich selbst, bevor es etwas ausgibt.
+    Frueher wurde am Pfad des Interpreters erkannt -- damit blieb eine
+    Instanz unsichtbar, die mit einem anderen Python gestartet wurde. Genau
+    so lief monatelang ein zweiter Dienst aus dem Autostart mit.
+    Der eigene Prozess bleibt aussen vor, sonst beendet dieses Skript sich
+    selbst, bevor es etwas ausgibt.
     """
     found = []
     me = os.getpid()
+    target = os.path.normcase(os.path.join(BASE, "claude_rpc.py"))
     for pid, name, _ in R.iter_processes():
-        if pid == me or not name.startswith("pythonw"):
+        if pid == me or not name.startswith("python"):
             continue
-        path = R.process_path(pid)
-        if path and os.path.normcase(path).startswith(os.path.normcase(BASE)):
-            found.append((pid, path))
+        if target in os.path.normcase(R.process_cmdline(pid)):
+            found.append((pid, R.process_path(pid) or name))
     return found
 
 

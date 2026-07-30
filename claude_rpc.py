@@ -152,6 +152,45 @@ def process_path(pid):
         kernel32.CloseHandle(handle)
 
 
+def process_cmdline(pid):
+    """Befehlszeile einer PID ueber WMI, sonst "".
+
+    Wird gebraucht, um den Dienst unabhaengig vom verwendeten Interpreter
+    wiederzuerkennen -- am Pfad der EXE allein ist er nicht zu fassen.
+    """
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Process -Filter \"ProcessId=%d\")"
+             ".CommandLine" % pid],
+            capture_output=True, text=True, timeout=15,
+            creationflags=0x08000000,
+        )
+        return (result.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def single_instance(name="claude_rpc_presence"):
+    """True, wenn keine zweite Instanz laeuft.
+
+    Ein benannter Mutex ist der einzige Schutz, der auch dann greift, wenn
+    die andere Instanz mit einem voellig anderen Python gestartet wurde.
+    Das Handle bleibt absichtlich fuer die Prozesslaufzeit offen.
+    """
+    global _INSTANCE_LOCK
+    kernel32.CreateMutexW.restype = ctypes.wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [
+        ctypes.c_void_p, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR,
+    ]
+    _INSTANCE_LOCK = kernel32.CreateMutexW(None, False, "Local\\" + name)
+    return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+
+
+_INSTANCE_LOCK = None
+
+
 def iter_processes():
     """(pid, exe-name klein, voller Pfad) ueber alle sichtbaren Prozesse."""
     snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
@@ -901,13 +940,23 @@ class LocalUsageWatcher:
             return None
         now = time.time()
         if now >= self.next_refresh:
-            self.next_refresh = now + self.cfg.get("refresh_minutes", 5) * 60
-            self.text = self._read()
+            fresh = self._read()
+            if fresh:
+                self.text = fresh
+                self.next_refresh = now + self.cfg.get("refresh_minutes", 5) * 60
+            else:
+                # Die App schreibt die Datei alle fuenf Minuten neu. Faellt
+                # eine Lesung aus, wird bald erneut versucht statt eine
+                # volle Runde auszusetzen -- und der letzte Wert bleibt
+                # stehen, statt die Anzeige leer zu raeumen.
+                self.next_refresh = now + self.cfg.get("retry_seconds", 30)
         return self.text
 
     def _read(self):
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = self._load_json()
+            if data is None:
+                return None
             samples = data.get("samples") or []
             if not samples:
                 return None
@@ -937,6 +986,26 @@ class LocalUsageWatcher:
         except Exception as exc:
             logging.warning("Local-Usage-Watcher fehlgeschlagen: %s", exc)
             return None
+
+    def _load_json(self):
+        """Liest die Datei mit kurzen Wiederholungen.
+
+        Die App ersetzt die Datei periodisch. Wer genau in diesen Moment
+        liest, bekommt ENOENT oder eine halb geschriebene Datei zu sehen --
+        beides ist kein Grund, die Anzeige zu leeren.
+        """
+        attempts = max(1, self.cfg.get("read_attempts", 4))
+        last_error = None
+        for number in range(attempts):
+            try:
+                return json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                last_error = exc
+                if number + 1 < attempts:
+                    time.sleep(0.2)
+        logging.info("Nutzungsdatei nicht lesbar (%d Versuche): %s",
+                     attempts, last_error)
+        return None
 
 
 class RichPresence:
@@ -984,6 +1053,13 @@ class RichPresence:
 
 
 def main():
+    if not single_instance():
+        logging.error(
+            "Es laeuft bereits eine Instanz - Abbruch. Zwei Dienste wuerden "
+            "sich die Discord-Verbindung streitig machen."
+        )
+        return
+
     cfg = load_config()
     client_id = str(cfg.get("client_id", ""))
     if not client_id.isdigit():
