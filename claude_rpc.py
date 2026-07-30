@@ -538,10 +538,22 @@ class UIWatcher:
     def status(self):
         text = self.data.get("status")
         if text:
-            return text
+            return self._tidy(text)
         if self.data.get("busy") and self.cfg.get("busy_text"):
             return self.cfg["busy_text"]
         return None
+
+    def _tidy(self, text):
+        """Doppelten Namensteil zusammenfassen.
+
+        Server aus Plugins heissen "plugin:server". Sind beide Teile gleich,
+        steht in der Presence "context-mode:context-mode wird verwendet" --
+        die Haelfte davon ist Fuellmaterial. Unterschiedliche Teile bleiben
+        erhalten, dort traegt der Praefix ja Information.
+        """
+        if not self.cfg.get("collapse_duplicate_prefix", True):
+            return text
+        return re.sub(r"^([^\s:]+):\1\b", r"\1", text)
 
     def busy(self):
         return bool(self.data.get("busy"))

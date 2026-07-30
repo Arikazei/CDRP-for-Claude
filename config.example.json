@@ -47,6 +47,7 @@
     "template": "using cowork with {model}",
     "busy_text": "Claude arbeitet gerade...",
     "require_busy": true,
+    "collapse_duplicate_prefix": true,
     "status_lookback": 12,
     "tool_status_pattern": "(wird verwendet|is using)",
     "composer_pattern": "(Anfrage an Claude|Nachricht|Message Claude|Reply to Claude)"
