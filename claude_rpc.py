@@ -21,9 +21,10 @@ import re
 from pypresence import Presence
 
 from hostplatform import (
-    DEFAULT_PROCESS_NAMES, FOCUS_SUPPORTED, IDLE_SUPPORTED, claude_candidates,
-    claude_config_dir, claude_running, foreground_process_name, idle_seconds,
-    init_com, iter_processes, process_cmdline, process_path, single_instance,
+    DEFAULT_PROCESS_NAMES, accessibility_enable, claude_candidates,
+    claude_config_dir, claude_focused, claude_running, idle_backend_name,
+    idle_configure, idle_seconds, idle_supported, init_com, iter_processes,
+    process_cmdline, process_path, single_instance,
 )
 
 try:
@@ -980,6 +981,17 @@ def main():
     poll = cfg.get("poll_interval_seconds", 5)
     open_pool = (cfg.get("texts", {}).get("open")) or ["Claude Desktop"]
 
+    # Erst die Schwelle anmelden, dann messen: unter Wayland liefert der
+    # Compositor keine Leerlaufzeit, sondern meldet nur das Ueberschreiten
+    # genau dieser Grenze.
+    idle_configure(active_threshold)
+    if (cfg.get("ui_watcher") or {}).get("enabled", True):
+        # Ohne diesen Schalter veroeffentlicht Electron unter Linux keinen
+        # Baum, und der UIWatcher sieht ein leeres Fenster. Unter Windows
+        # ist der Aufruf wirkungslos.
+        accessibility_enable()
+    logging.info("Leerlaufmessung: %s", idle_backend_name())
+
     local_usage = LocalUsageWatcher(cfg.get("local_usage"))
     limits = LimitStore(cfg.get("ui_limits"))
     session = SessionInfo(cfg.get("session_info"))
@@ -1035,13 +1047,12 @@ def main():
                 time.sleep(max(poll, 15))
                 continue
 
-            # Fokus und Leerlaufzeit sind nicht ueberall zu haben. Wo das
-            # Fenstersystem sie nicht hergibt (Wayland etwa verweigert beides
-            # von sich aus), gilt der laufende Prozess als bestes Signal --
-            # die Presence bleibt dann sichtbar, solange Claude laeuft.
-            focused = (foreground_process_name() in process_names
-                       if FOCUS_SUPPORTED else True)
-            ruhig = idle_seconds() <= active_threshold if IDLE_SUPPORTED else True
+            # Fokus und Leerlaufzeit sind nicht ueberall zu haben. Wo der
+            # Rechner sie nicht hergibt, gilt der laufende Prozess als bestes
+            # Signal -- die Presence bleibt dann sichtbar, solange Claude
+            # laeuft. Beide Aufrufe entscheiden im Zweifel fuer "aktiv".
+            focused = claude_focused(process_names)
+            ruhig = idle_seconds() <= active_threshold if idle_supported() else True
             currently_active = focused and ruhig
             if currently_active:
                 last_active = now

@@ -5,16 +5,20 @@ claude_rpc.py kennt danach nur noch diese Schnittstelle:
     iter_processes()            (pid, exe-name klein, None)
     process_path(pid)           voller Pfad oder ""
     process_cmdline(pid)        Befehlszeile oder ""
-    foreground_process_name()   Name des Fensters im Vordergrund oder ""
+    claude_focused(namen)       Hat Claude gerade den Fokus?
     idle_seconds()              Sekunden seit der letzten Eingabe
+    idle_supported()            Traegt die Leerlaufmessung hier ueberhaupt?
+    idle_configure(sekunden)    Schwelle setzen, bevor gemessen wird
     single_instance(name)       False, wenn schon eine Instanz laeuft
     claude_config_dir()         Datenordner der Claude-Desktop-App
 
-Zwei Zusagen sind ausdruecklich optional, weil Linux sie nicht ueberall
-hergibt: FOCUS_SUPPORTED und IDLE_SUPPORTED. Wo sie False sind, darf sich
-der Aufrufer nicht auf die Werte verlassen, sondern muss auf ein groeberes
-Signal ausweichen -- unter Wayland ist die Abfrage des aktiven Fensters
-vom Protokoll her nicht vorgesehen, das ist kein Bibliotheksproblem.
+Fokus und Leerlaufzeit sind ausdruecklich optional. Unter Windows gibt es
+fuer beides genau eine Antwort; unter Linux haengen sie von der
+Arbeitsumgebung und vom Fenstersystem ab, weshalb linuxdesktop.py der
+Reihe nach alle gaengigen Wege durchprobiert. Wo nichts traegt, meldet
+idle_supported() False und claude_focused() True -- der Aufrufer weicht
+dann auf "laeuft Claude ueberhaupt" aus, statt auf falschen Messwerten
+Entscheidungen zu treffen.
 """
 import logging
 import os
@@ -23,6 +27,11 @@ from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+
+# Wird nur im Linux-Zweig gesetzt. Der Vorbelegung wegen darf jede Funktion
+# weiter unten den Namen nennen, ohne auf die Auswertungsreihenfolge von
+# "or" angewiesen zu sein.
+linuxdesktop = None
 
 
 if IS_WINDOWS:
@@ -168,16 +177,21 @@ if IS_WINDOWS:
 
 
 else:
-    # Linux (Stufe 1): alles, was ohne Fenstersystem auskommt.
+    # Linux: Prozesse und Pfade hier, alles Desktopnahe in linuxdesktop.py.
     #
-    # Fokus und Leerlaufzeit bleiben bewusst offen. Unter X11 waeren sie
-    # ueber python-xlib nachruestbar, unter Wayland gibt es sie aus
-    # Sicherheitsgruenden gar nicht. Solange FOCUS_SUPPORTED False ist,
-    # weicht der Aufrufer auf "laeuft Claude ueberhaupt" aus.
+    # Der Import ist bewusst weich: fehlt jeepney oder laeuft der Daemon
+    # ohne Sitzungsbus, soll die Presence trotzdem starten und nur auf
+    # Fokus und Leerlauf verzichten.
     import fcntl
 
-    FOCUS_SUPPORTED = False
-    IDLE_SUPPORTED = False
+    try:
+        import linuxdesktop
+    except Exception as _exc:                       # pragma: no cover
+        linuxdesktop = None
+        logging.info("linuxdesktop nicht verfuegbar: %s", _exc)
+
+    FOCUS_SUPPORTED = linuxdesktop is not None
+    IDLE_SUPPORTED = linuxdesktop is not None
 
     _INSTANCE_LOCK = None
 
@@ -207,10 +221,13 @@ else:
             return ""
 
     def foreground_process_name():
-        return ""   # siehe FOCUS_SUPPORTED
+        """Unter Linux nicht beantwortbar -- weder X11 noch Wayland geben
+        den Prozessnamen des aktiven Fensters heraus. Die Frage, auf die es
+        ankommt, beantwortet claude_focused() ueber AT-SPI."""
+        return ""
 
     def idle_seconds():
-        return 0.0  # siehe IDLE_SUPPORTED
+        return linuxdesktop.leerlauf_sekunden() if linuxdesktop else 0.0
 
     def single_instance(name="claude_rpc_presence"):
         """Sperrdatei mit flock. Der Deskriptor bleibt absichtlich offen;
@@ -262,6 +279,71 @@ def claude_candidates():
         if "claude" in name:
             treffer.append((pid, name, process_path(pid)))
     return treffer
+
+
+def claude_focused(process_names):
+    """Hat Claude gerade den Fokus? Im Zweifel True.
+
+    Windows fragt das Fenster im Vordergrund ab. Linux geht ueber AT-SPI,
+    weil das unter Wayland der einzige desktopuebergreifende Weg ist. Laesst
+    sich die Frage nicht beantworten -- keine Barrierefreiheitsbruecke, kein
+    Sitzungsbus --, lautet die Antwort True: lieber eine Presence zu viel als
+    eine, die grundlos verschwindet.
+    """
+    if IS_WINDOWS:
+        return foreground_process_name() in process_names
+    if not IS_LINUX or linuxdesktop is None:
+        return True
+    antwort = linuxdesktop.claude_im_vordergrund()
+    return True if antwort is None else antwort
+
+
+def idle_supported():
+    """Traegt die Leerlaufmessung auf diesem Rechner?
+
+    Unter Linux steht das erst nach dem ersten Versuch fest, weil die
+    Antwort von der Arbeitsumgebung abhaengt. Deshalb eine Funktion und
+    keine Konstante.
+    """
+    if IS_WINDOWS:
+        return True
+    if not IS_LINUX or linuxdesktop is None:
+        return False
+    return linuxdesktop.leerlauf_verfuegbar()
+
+
+def idle_configure(sekunden):
+    """Schwelle fuer die Leerlaufmessung anmelden.
+
+    Muss vor der ersten Messung kommen: der Wayland-Weg liefert keine Zeit,
+    sondern meldet das Ueber- und Unterschreiten genau dieser Schwelle.
+    """
+    if IS_LINUX and linuxdesktop is not None:
+        linuxdesktop.leerlauf_schwelle_setzen(sekunden)
+
+
+def idle_backend_name():
+    """Welcher Weg misst gerade? Nur fuer das Protokoll."""
+    if IS_WINDOWS:
+        return "GetLastInputInfo"
+    if not IS_LINUX or linuxdesktop is None:
+        return "keins"
+    return linuxdesktop.leerlauf_name()
+
+
+def accessibility_enable():
+    """Barrierefreiheitsbruecke einschalten (nur Linux).
+
+    Electron veroeffentlicht seinen Baum nur, solange org.a11y.Status.
+    IsEnabled true ist. Ohne diesen Schalter bleibt das Claude-Fenster
+    unsichtbar -- fuer Bildschirmleser wie fuer uns.
+    """
+    if IS_LINUX and linuxdesktop is not None:
+        try:
+            return linuxdesktop.barrierefreiheit_einschalten()
+        except Exception as exc:
+            logging.info("Barrierefreiheit nicht einschaltbar: %s", exc)
+    return False
 
 
 def init_com():

@@ -20,12 +20,36 @@ das System-Python verwendet.
 den Sitzungsdateien, Auslastung aus der Nutzungsdatei, Abo aus der
 Einstellung — also die zweite Zeile vollständig.
 
+**Fokus und Leerlaufzeit** ab v1.3.0. Weil unter Linux keiner dieser Wege
+überall vorhanden ist, probiert `linuxdesktop.py` der Reihe nach alle
+gängigen durch und behält den ersten, der antwortet:
+
+| Weg | wo er trägt |
+|---|---|
+| Wayland `ext-idle-notify-v1` | Plasma 6, GNOME 45+, Sway, Hyprland |
+| GNOME Mutter `IdleMonitor` | GNOME unter X11 und Wayland |
+| `org.freedesktop.ScreenSaver` | KDE unter X11, XFCE, MATE |
+| X11 MIT-SCREEN-SAVER | jede reine X11-Sitzung |
+| systemd-logind `IdleSinceHint` | wo die Sitzungsverwaltung ihn pflegt |
+| Sperrbildschirm an/aus | grober Notnagel, nur zwei Zustände |
+
+Der Fokus läuft über **AT-SPI**, die Barrierefreiheitsschnittstelle. Das ist
+der einzige desktopübergreifende Weg: KDE und GNOME geben das aktive Fenster
+aus Sicherheitsgründen nicht heraus, AT-SPI dagegen ist ein
+freedesktop-Standard über D-Bus und damit unabhängig vom Fenstersystem.
+Trägt keiner der Wege, bleibt die Presence sichtbar, solange Claude läuft —
+sie schaltet dann nur nicht mehr auf „abwesend".
+
 **Was noch fehlt:** Das Auslesen des Claude-Fensters gibt es nur unter
 Windows. Damit fehlen unter Linux das Modell reiner Cloud-Chats, die
-Live-Statuszeile und das modellspezifische Limit. Und weil **Wayland das
-aktive Fenster und die Leerlaufzeit aus Sicherheitsgründen nicht herausgibt**,
-blendet sich die Presence dort nicht bei Inaktivität aus, sondern bleibt
-sichtbar, solange Claude Desktop läuft.
+Live-Statuszeile und das modellspezifische Limit. Die Grundlage dafür steht
+mit `atspi_knoten()` bereits; was fehlt, ist der Parser für die Knotennamen.
+
+Was dein Rechner hergibt, sagt dir das Diagnoseprogramm aus dem Release:
+
+```bash
+chmod +x atspi-dump && ./atspi-dump
+```
 
 Erkannt wird der Prozess `claude-desktop`. Der nackte Name `claude` gehört
 der Kommandozeilenfassung und ist bewusst ausgeschlossen. Heißt der

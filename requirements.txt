@@ -1,2 +1,13 @@
+# Bewusst ohne Umgebungsmarker: das Paket wird auf einem Rechner gebaut und
+# auf beiden Systemen installiert. Ein Marker wie sys_platform == "linux"
+# wuerde jeepney beim Bau unter Windows weglassen -- das fertige Paket waere
+# dann auf Linux stumm. Beide Bibliotheken sind reines Python und werden
+# jeweils nur auf ihrem System importiert.
 pypresence
+
+# Windows: liest das Nutzungsfenster ueber UI Automation.
 uiautomation
+
+# Linux: D-Bus in reinem Python, ohne Compiler und ohne libdbus.
+# Traegt Leerlaufmessung, Fokus und den Zugriff auf den AT-SPI-Baum.
+jeepney

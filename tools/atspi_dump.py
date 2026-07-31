@@ -1,85 +1,43 @@
 #!/usr/bin/env python3
-"""Diagnose fuer die Linux-Fassung: was gibt der Rechner wirklich her?
+"""Diagnose fuer die Linux-Fassung: was gibt dieser Rechner wirklich her?
 
-Beantwortet vier Fragen, statt sie zu raten:
+Prueft genau die Wege, die auch die Presence benutzt -- das Programm ruft
+dieselbe Datei linuxdesktop.py auf, die spaeter im Betrieb laeuft. Was hier
+gruen ist, funktioniert dort auch.
+
   1. Sitzungstyp und Arbeitsumgebung
-  2. Ist die Barrierefreiheitsbruecke aktiv? (ohne sie bleibt der Baum leer)
-  3. Taucht das Claude-Fenster im AT-SPI-Baum auf, und wie heissen die Knoten?
-  4. Laesst sich die Leerlaufzeit ueber D-Bus abfragen?
+  2. Barrierefreiheitsbruecke (ohne sie bleibt der Baum leer)
+  3. AT-SPI-Baum: taucht Claude auf, und wie heissen die Knoten?
+  4. Leerlaufzeit: welcher der sechs Wege traegt hier?
+  5. Fokus ueber AT-SPI
 
-Aufruf (fertig gepacktes Programm, keine Installation noetig):
+Aufruf:
     chmod +x atspi-dump
-    ./atspi-dump
+    ./atspi-dump                 schaltet die Barrierefreiheit ein
+    ./atspi-dump --nichts-aendern     nur lesen, nichts umstellen
 
-Aufruf aus dem Quelltext (dann wird jeepney gebraucht):
-    pip install --user jeepney
-    python3 atspi_dump.py
-
-Wichtig: in der laufenden Desktop-Sitzung starten, nicht per SSH,
-und mit geoeffnetem Claude-Fenster. Ausgabe bitte vollstaendig
-zurueckschicken.
+In der laufenden Desktop-Sitzung starten, nicht per SSH, und mit
+geoeffnetem Claude-Fenster. Ausgabe bitte vollstaendig zurueckschicken.
 """
 import os
 import sys
+import time
 
-try:
-    from jeepney import DBusAddress, MessageType, new_method_call
-    from jeepney.io.blocking import open_dbus_connection
-except ImportError:
-    sys.exit("Bitte zuerst: pip install --user jeepney")
+import linuxdesktop as ld
 
-ATSPI = "org.a11y.atspi.Accessible"
-ROOT = "/org/a11y/atspi/accessible/root"
+AENDERN = "--nichts-aendern" not in sys.argv
 
 
-class Fehler(object):
-    """Fehlgeschlagener Aufruf. Traegt den Grund mit, statt zu werfen."""
-
-    def __init__(self, text):
-        self.text = str(text)
-
-    def __str__(self):
-        return "-- %s" % self.text
-
-    __repr__ = __str__
+def ueberschrift(text):
+    print()
+    print("=" * 62)
+    print(text)
+    print("=" * 62)
 
 
-def hole(conn, bus_name, pfad, schnittstelle, methode, signatur=None, args=None):
-    """Einzelner D-Bus-Aufruf. Gibt den Rumpf zurueck oder ein Fehler-Objekt.
-
-    Wichtig: eine D-Bus-Fehlerantwort ist eine gueltige Nachricht, keine
-    Ausnahme. Ohne die Pruefung auf message_type wuerde der Fehlertext als
-    Nutzdaten weitergereicht.
-    """
-    ziel = DBusAddress(pfad, bus_name=bus_name, interface=schnittstelle)
-    try:
-        antwort = conn.send_and_get_reply(
-            new_method_call(ziel, methode, signatur, args))
-    except Exception as exc:
-        return Fehler(exc)
-    if antwort.header.message_type is MessageType.error:
-        grund = antwort.body[0] if antwort.body else "unbekannter D-Bus-Fehler"
-        return Fehler(grund)
-    return antwort.body
-
-
-def eigenschaft(conn, bus_name, pfad, schnittstelle, name):
-    """Eine Eigenschaft lesen. Properties.Get liefert eine Variante (Typ, Wert)."""
-    ergebnis = hole(conn, bus_name, pfad, "org.freedesktop.DBus.Properties",
-                    "Get", "ss", (schnittstelle, name))
-    if isinstance(ergebnis, Fehler):
-        return ergebnis
-    try:
-        return ergebnis[0][1]
-    except Exception:
-        return Fehler("unerwartete Antwort: %r" % (ergebnis,))
-
-
-print("=" * 62)
-print("1. Umgebung")
-print("=" * 62)
+ueberschrift("1. Umgebung")
 for schluessel in ("XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DESKTOP_SESSION",
-                   "WAYLAND_DISPLAY", "DISPLAY"):
+                   "WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_ID"):
     print("  %-20s %s" % (schluessel, os.environ.get(schluessel, "(nicht gesetzt)")))
 
 if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
@@ -87,136 +45,85 @@ if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
              "  Das Programm muss in der laufenden Desktop-Sitzung starten,\n"
              "  nicht per SSH oder aus einer Textkonsole heraus.")
 
-try:
-    sitzung = open_dbus_connection(bus="SESSION")
-except Exception as exc:
-    sys.exit("\n  Verbindung zum Sitzungs-D-Bus fehlgeschlagen: %s" % exc)
 
-print()
-print("=" * 62)
-print("2. Barrierefreiheitsbruecke")
-print("=" * 62)
-for name in ("IsEnabled", "ScreenReaderEnabled"):
-    print("  org.a11y.Status.%-20s %s" % (
-        name, eigenschaft(sitzung, "org.a11y.Bus", "/org/a11y/bus",
-                          "org.a11y.Status", name)))
-adresse = hole(sitzung, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
-               "GetAddress")
-if isinstance(adresse, Fehler):
-    print("  Adresse des a11y-Busses      %s" % adresse)
+ueberschrift("2. Barrierefreiheitsbruecke")
+print("  IsEnabled vorher             %s" % ld.barrierefreiheit_status())
+if AENDERN:
+    erfolg = ld.barrierefreiheit_einschalten()
+    time.sleep(1.0)
+    print("  eingeschaltet                %s" % ("ja" if erfolg else "nein"))
+    print("  IsEnabled nachher            %s" % ld.barrierefreiheit_status())
+    print()
+    print("  Hinweis: dieser Schalter ist derselbe, den ein Bildschirmleser")
+    print("  umlegt. Electron veroeffentlicht seinen Baum nur, solange er an")
+    print("  ist. Die Einstellung gilt bis zum Ende der Sitzung und wird")
+    print("  nirgends dauerhaft gespeichert -- ein Abmelden setzt sie zurueck.")
 else:
-    print("  Adresse des a11y-Busses      %s" % (adresse[0],))
+    print("  (unveraendert gelassen, wie gewuenscht)")
 
 
-def leerlauf_pruefen():
-    """Abschnitt 4. Steht als Funktion da, damit sie auch nach einem
-    fruehen Ausstieg in Abschnitt 3 noch laeuft."""
-    print()
-    print("=" * 62)
-    print("4. Leerlaufzeit ueber D-Bus")
-    print("=" * 62)
-    for dienst, pfad, schnittstelle, methode in (
-            ("org.freedesktop.ScreenSaver", "/ScreenSaver",
-             "org.freedesktop.ScreenSaver", "GetSessionIdleTime"),
-            ("org.gnome.Mutter.IdleMonitor", "/org/gnome/Mutter/IdleMonitor/Core",
-             "org.gnome.Mutter.IdleMonitor", "GetIdletime"),
-    ):
-        ergebnis = hole(sitzung, dienst, pfad, schnittstelle, methode)
-        if isinstance(ergebnis, Fehler):
-            print("  %-38s %s" % (methode, ergebnis))
-        else:
-            wert = ergebnis[0] if ergebnis else None
-            zusatz = ""
-            if isinstance(wert, int):
-                zusatz = "  (entspricht %.1f s, falls Millisekunden)" % (wert / 1000.0)
-            print("  %-38s %s%s" % (methode, wert, zusatz))
-    print()
-    print("Fertig. Bitte die gesamte Ausgabe zurueckschicken.")
-
-
-print()
-print("=" * 62)
-print("3. AT-SPI-Baum")
-print("=" * 62)
-if isinstance(adresse, Fehler):
-    print("  Kein a11y-Bus erreichbar. Unter KDE hilft meist:")
-    print("    sudo apt install at-spi2-core     (bzw. das Paket der Distribution)")
-    print("  und Claude einmal mit --force-renderer-accessibility starten.")
-    leerlauf_pruefen()
-    sys.exit(0)
-
-try:
-    a11y = open_dbus_connection(bus=adresse[0])
-except Exception as exc:
-    print("  Verbindung zum a11y-Bus fehlgeschlagen: %s" % exc)
-    leerlauf_pruefen()
-    sys.exit(0)
-
-
-def kinder(bus_name, pfad):
-    ergebnis = hole(a11y, bus_name, pfad, ATSPI, "GetChildren")
-    if isinstance(ergebnis, Fehler) or not ergebnis:
-        return []
-    return ergebnis[0]
-
-
-def name_von(bus_name, pfad):
-    wert = eigenschaft(a11y, bus_name, pfad, ATSPI, "Name")
-    return "" if isinstance(wert, Fehler) else wert
-
-
-def rolle_von(bus_name, pfad):
-    ergebnis = hole(a11y, bus_name, pfad, ATSPI, "GetRoleName")
-    if isinstance(ergebnis, Fehler) or not ergebnis:
-        return "?"
-    return ergebnis[0]
-
-
-anwendungen = kinder("org.a11y.atspi.Registry", ROOT)
+ueberschrift("3. AT-SPI-Baum")
+anwendungen = ld.atspi_anwendungen()
 print("  Anwendungen im Baum: %d" % len(anwendungen))
-treffer = []
-for bus_name, pfad in anwendungen:
-    titel = name_von(bus_name, pfad)
-    print("    %-28s %s" % (titel, bus_name))
-    if titel and "claude" in str(titel).lower():
-        treffer.append((bus_name, pfad, titel))
+for _bus, _pfad, name in anwendungen:
+    print("    %s" % name)
 
-if not treffer:
+knoten = ld.atspi_knoten("claude")
+if not knoten:
     print()
-    print("  Claude nicht im Baum. Das heisst fast immer: Electron hat die")
-    print("  Barrierefreiheit nicht eingeschaltet. Versuch einmal")
-    print("    claude-desktop --force-renderer-accessibility")
-    print("  und lass dieses Programm erneut laufen.")
-    leerlauf_pruefen()
-    sys.exit(0)
-
-
-MAX_KNOTEN = 4000
-gezaehlt = 0
-
-
-def ablaufen(bus_name, pfad, tiefe=0):
-    """Baum ausgeben. Gedeckelt, damit die Ausgabe handhabbar bleibt."""
-    global gezaehlt
-    if gezaehlt >= MAX_KNOTEN or tiefe > 40:
-        return
-    for kind_bus, kind_pfad in kinder(bus_name, pfad):
-        gezaehlt += 1
-        if gezaehlt >= MAX_KNOTEN:
-            print("  ... bei %d Knoten abgeschnitten" % MAX_KNOTEN)
-            return
-        titel = name_von(kind_bus, kind_pfad)
-        rolle = rolle_von(kind_bus, kind_pfad)
-        if titel:
-            print("%s%-18s %s" % ("  " * (tiefe + 1), rolle, str(titel)[:110]))
-        ablaufen(kind_bus, kind_pfad, tiefe + 1)
-
-
-for bus_name, pfad, titel in treffer:
+    print("  Claude nicht im Baum. Zwei moegliche Gruende:")
+    print("    a) Electron hat die Bruecke beim Start nicht gesehen.")
+    print("       Claude einmal beenden und neu starten, dann dieses")
+    print("       Programm erneut laufen lassen.")
+    print("    b) Der Start braucht den Schalter ausdruecklich:")
+    print("       claude-desktop --force-renderer-accessibility")
+else:
     print()
-    print("  ===== Baum von %r =====" % titel)
-    ablaufen(bus_name, pfad)
+    print("  Knoten unter Claude: %d" % len(knoten))
+    for tiefe, rolle, name in knoten:
+        if name:
+            print("%s%-18s %s" % ("  " * (tiefe + 1), rolle, str(name)[:110]))
+
+
+ueberschrift("4. Leerlaufzeit")
+print("  Jeder Weg einzeln, ohne Auswahl:")
+for funktion, name in ((ld._idle_mutter, "GNOME Mutter IdleMonitor"),
+                       (ld._idle_screensaver, "org.freedesktop.ScreenSaver"),
+                       (ld._idle_x11, "X11 MIT-SCREEN-SAVER"),
+                       (ld._idle_logind, "systemd-logind IdleHint"),
+                       (ld._idle_sperrbildschirm, "Sperrbildschirm an/aus")):
+    try:
+        wert = funktion()
+    except Exception as exc:
+        wert = "Ausnahme: %s" % exc
+    print("    %-32s %s" % (name, "-- keine Antwort" if wert is None else wert))
+
 print()
-print("  Knoten insgesamt: %d" % gezaehlt)
+print("  Wayland-Melder (ext-idle-notify-v1), Schwelle 3 s:")
+ld.leerlauf_schwelle_setzen(3)
+print("    gewaehltes Backend           %s" % ld.leerlauf_name())
+print("    Messung jetzt                %.1f s" % ld.leerlauf_sekunden())
+if ld.leerlauf_verfuegbar():
+    print("    Bitte 5 s nichts anfassen ...")
+    time.sleep(5)
+    wert = ld.leerlauf_sekunden()
+    print("    Messung nach 5 s Ruhe        %.1f s" % wert)
+    print("    %s" % ("sieht richtig aus" if wert >= 3
+                      else "Achtung: haette ueber 3 s liegen muessen"))
+else:
+    print("    Kein Weg traegt hier. Die Presence bleibt dann sichtbar,")
+    print("    solange Claude laeuft -- sie schaltet nur nicht mehr auf")
+    print("    'abwesend' um.")
 
-leerlauf_pruefen()
+
+ueberschrift("5. Fokus ueber AT-SPI")
+antwort = ld.claude_im_vordergrund()
+if antwort is None:
+    print("  Nicht beantwortbar (kein a11y-Bus oder Claude nicht im Baum).")
+    print("  Die Presence nimmt dann 'im Vordergrund' an.")
+else:
+    print("  Claude im Vordergrund: %s" % ("ja" if antwort else "nein"))
+    print("  (Wenn das Claude-Fenster gerade oben liegt, muss hier ja stehen.)")
+
+print()
+print("Fertig. Bitte die gesamte Ausgabe zurueckschicken.")
