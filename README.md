@@ -5,7 +5,32 @@ des offenen Chats, was Claude gerade tut, deine Auslastung, dein Abonnement
 und ein Timer. Die Presence verschwindet nach einstellbarer
 Inaktivität und ist bei Fokus sofort wieder da.
 
-Inoffizielles Projekt, nicht von Anthropic oder Discord. Windows only.
+Inoffizielles Projekt, nicht von Anthropic oder Discord. Windows und Linux.
+
+## Linux
+
+Läuft ab v1.2.0 auch unter Linux, mit Einschränkungen. Voraussetzung ist
+[Claude Desktop für Linux](https://code.claude.com/docs/en/desktop-linux)
+(Beta, Ubuntu 22.04+ oder Debian 12+) und ein `python3` ab 3.9 — beides
+bringt eine übliche Installation ohnehin mit. Dasselbe Paket dient beiden
+Systemen; unter Windows wird eine eigene Runtime mitgeliefert, unter Linux
+das System-Python verwendet.
+
+**Was funktioniert:** laufende Tätigkeit aus dem Werkzeugverlauf, Modell aus
+den Sitzungsdateien, Auslastung aus der Nutzungsdatei, Abo aus der
+Einstellung — also die zweite Zeile vollständig.
+
+**Was noch fehlt:** Das Auslesen des Claude-Fensters gibt es nur unter
+Windows. Damit fehlen unter Linux das Modell reiner Cloud-Chats, die
+Live-Statuszeile und das modellspezifische Limit. Und weil **Wayland das
+aktive Fenster und die Leerlaufzeit aus Sicherheitsgründen nicht herausgibt**,
+blendet sich die Presence dort nicht bei Inaktivität aus, sondern bleibt
+sichtbar, solange Claude Desktop läuft.
+
+Erkannt wird der Prozess `claude-desktop`. Der nackte Name `claude` gehört
+der Kommandozeilenfassung und ist bewusst ausgeschlossen. Heißt der
+Hauptprozess bei dir anders, trägst du ihn unter `process_names` ein — das
+Log nennt bei Nichterkennung stündlich alle gefundenen Kandidaten samt Pfad.
 
 ## Installation
 
