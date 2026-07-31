@@ -99,18 +99,38 @@ for funktion, name in ((ld._idle_mutter, "GNOME Mutter IdleMonitor"),
     print("    %-32s %s" % (name, "-- keine Antwort" if wert is None else wert))
 
 print()
-print("  Wayland-Melder (ext-idle-notify-v1), Schwelle 3 s:")
-ld.leerlauf_schwelle_setzen(3)
-print("    gewaehltes Backend           %s" % ld.leerlauf_name())
-print("    Messung jetzt                %.1f s" % ld.leerlauf_sekunden())
-if ld.leerlauf_verfuegbar():
-    print("    Bitte 5 s nichts anfassen ...")
-    time.sleep(5)
-    wert = ld.leerlauf_sekunden()
-    print("    Messung nach 5 s Ruhe        %.1f s" % wert)
-    print("    %s" % ("sieht richtig aus" if wert >= 3
-                      else "Achtung: haette ueber 3 s liegen muessen"))
+print("  Wayland, beide Meldearten im Vergleich, Schwelle 3 s.")
+print("  Bitte jetzt 8 s lang nichts anfassen ...")
+probe = ld.wayland_gegenprobe(3.0, 8.0)
+if probe["fehler"]:
+    print("    %s" % probe["fehler"])
 else:
+    print("    angebotene Protokollfassung  %d" % probe["version"])
+    print("    mit Leerlaufsperren          %s" % (
+        "-- keine Meldung" if not probe["mit_sperren"]
+        else "%.1f s" % probe["mit_sperren"]))
+    print("    nur Eingaben (Fassung 2)     %s" % (
+        "-- nicht vorhanden" if probe["version"] < 2
+        else ("-- keine Meldung" if not probe["nur_eingabe"]
+              else "%.1f s" % probe["nur_eingabe"])))
+    if probe["nur_eingabe"] and not probe["mit_sperren"]:
+        print()
+        print("    Aufschlussreich: nur die eingabebezogene Meldung feuert.")
+        print("    Eine Anwendung haelt also eine Leerlaufsperre -- typisch")
+        print("    fuer Browser mit laufendem Ton, Videoplayer oder VR.")
+        print("    Genau deshalb benutzt die Presence Fassung 2.")
+    elif not probe["nur_eingabe"] and not probe["mit_sperren"]:
+        print()
+        print("    Keine der beiden Meldungen kam. Entweder wurde doch die")
+        print("    Maus bewegt, oder der Compositor meldet hier gar nichts.")
+
+print()
+print("  Was die Presence daraus waehlt:")
+ld.leerlauf_schwelle_setzen(3)
+print("    Backend                      %s" % ld.leerlauf_name())
+print("    (Der Zaehler faengt hier bei null an -- dieser Melder wird")
+print("     gerade erst angemeldet. Der Beweis steht in der Gegenprobe.)")
+if not ld.leerlauf_verfuegbar():
     print("    Kein Weg traegt hier. Die Presence bleibt dann sichtbar,")
     print("    solange Claude laeuft -- sie schaltet nur nicht mehr auf")
     print("    'abwesend' um.")

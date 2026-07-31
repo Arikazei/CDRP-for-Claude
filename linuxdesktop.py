@@ -107,8 +107,11 @@ class _WaylandLeerlauf(object):
     nach einer Wartezeit neu aufgebaut.
     """
 
-    def __init__(self, schwelle_s):
+    def __init__(self, schwelle_s, eingabe_bevorzugen=True):
         self.schwelle = max(1.0, float(schwelle_s))
+        self.eingabe_bevorzugen = eingabe_bevorzugen
+        self.protokollversion = 0
+        self.nur_eingabe = False
         self._untaetig_seit = None
         self._lebt = False
         self._sperre = threading.Lock()
@@ -238,12 +241,26 @@ class _WaylandLeerlauf(object):
             return neu
 
         seat = binden("wl_seat", 1)
-        melder = binden("ext_idle_notifier_v1", 1)
+        angeboten = globale["ext_idle_notifier_v1"][1]
+        melder = binden("ext_idle_notifier_v1", 2)
         meldung = neue_id()
-        senden(melder, 1, struct.pack("<III", meldung,
-                                      int(self.schwelle * 1000), seat))
+
+        # Fassung 2 kennt get_input_idle_notification (Opcode 2). Der
+        # Unterschied ist entscheidend: get_idle_notification achtet auf
+        # Leerlaufsperren, die Videoplayer, Browser und VR-Anwendungen
+        # setzen -- dann meldet der Compositor nie Leerlauf, auch wenn seit
+        # Stunden niemand eine Taste gedrueckt hat. Opcode 2 zaehlt
+        # ausschliesslich echte Eingaben und ist damit das, was wir wissen
+        # wollen: sitzt jemand davor?
+        self.protokollversion = angeboten
+        self.nur_eingabe = angeboten >= 2 and self.eingabe_bevorzugen
+        senden(melder, 2 if self.nur_eingabe else 1,
+               struct.pack("<III", meldung, int(self.schwelle * 1000), seat))
         self._lebt = True
-        logging.info("Wayland-Leerlaufmelder aktiv, Schwelle %.0f s", self.schwelle)
+        logging.info("Wayland-Leerlaufmelder aktiv (Fassung %d, %s), Schwelle %.0f s",
+                     angeboten,
+                     "nur Eingaben" if self.nur_eingabe else "mit Leerlaufsperren",
+                     self.schwelle)
 
         while True:
             nachricht = lesen(60.0)
@@ -415,14 +432,36 @@ def leerlauf_name():
     return _backend_name
 
 
+_sperre_taugt = None
+
+
 def leerlauf_sekunden():
+    """Der gewaehlte Weg, verodert mit dem Sperrbildschirm.
+
+    Die Veroderung ist kein Guertel-und-Hosentraeger, sondern deckt einen
+    echten Fall ab: meldet der Compositor wegen einer Leerlaufsperre nie
+    Untaetigkeit, waere der Nutzer sonst dauerhaft "anwesend" -- auch mit
+    gesperrtem Bildschirm. Wer den Bildschirm sperrt, ist weg, unabhaengig
+    davon, was sonst noch laeuft.
+    """
+    global _sperre_taugt
     if not leerlauf_verfuegbar():
         return 0.0
     try:
         wert = _backend()
     except Exception:
-        return 0.0
-    return 0.0 if wert is None else float(wert)
+        wert = None
+    wert = 0.0 if wert is None else float(wert)
+
+    if _backend is _idle_sperrbildschirm or _sperre_taugt is False:
+        return wert
+    try:
+        gesperrt = _idle_sperrbildschirm()
+    except Exception:
+        gesperrt = None
+    if _sperre_taugt is None:
+        _sperre_taugt = gesperrt is not None
+    return max(wert, gesperrt or 0.0)
 
 
 # ------------------------------------------------- Barrierefreiheit/AT-SPI
@@ -485,6 +524,45 @@ def _ist_aktiv(bus_name, pfad):
     if not rumpf or not rumpf[0]:
         return False
     return bool(rumpf[0][0] & (1 << STATE_ACTIVE))
+
+
+def wayland_gegenprobe(schwelle_s=3.0, wartezeit_s=8.0):
+    """Beide Meldearten nebeneinander, nur fuer die Fehlersuche.
+
+    Feuert die eingabebezogene Meldung, die andere aber nicht, haelt eine
+    Anwendung eine Leerlaufsperre -- typisch fuer Videoplayer, Browser mit
+    laufendem Ton und VR-Umgebungen. Das ist der Unterschied zwischen
+    "niemand da" und "der Compositor darf es nicht sagen".
+    """
+    ergebnis = {"version": 0, "mit_sperren": None, "nur_eingabe": None,
+                "fehler": None}
+    melder = _WaylandLeerlauf(schwelle_s)
+    for _ in range(30):
+        if melder.lebt():
+            break
+        time.sleep(0.1)
+    if not melder.lebt():
+        ergebnis["fehler"] = "Melder kam nicht zustande"
+        return ergebnis
+    ergebnis["version"] = melder.protokollversion
+
+    zweiter = None
+    if melder.protokollversion >= 2:
+        # Der laufende Melder benutzt bereits Opcode 2. Fuer den Vergleich
+        # brauchen wir einen zweiten mit Opcode 1.
+        zweiter = _WaylandLeerlauf(schwelle_s, eingabe_bevorzugen=False)
+        for _ in range(30):
+            if zweiter.lebt():
+                break
+            time.sleep(0.1)
+
+    time.sleep(wartezeit_s)
+    if melder.protokollversion >= 2:
+        ergebnis["nur_eingabe"] = melder.sekunden()
+        ergebnis["mit_sperren"] = zweiter.sekunden() if zweiter else None
+    else:
+        ergebnis["mit_sperren"] = melder.sekunden()
+    return ergebnis
 
 
 def atspi_anwendungen():
