@@ -23,7 +23,10 @@ def running():
     me = os.getpid()
     target = os.path.normcase(os.path.join(BASE, "claude_rpc.py"))
     for pid, name, _ in R.iter_processes():
-        if pid == me or not name.startswith("python"):
+        if pid == me:
+            continue
+        if not (name.startswith("python")
+                or name.startswith("claudediscordpresence")):
             continue
         if target in os.path.normcase(R.process_cmdline(pid)):
             found.append((pid, R.process_path(pid) or name))

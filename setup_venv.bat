@@ -16,5 +16,7 @@ if not exist "%BASE%config.json" (
 "%PY%" -m venv "%BASE%.venv" || exit /b 1
 "%BASE%.venv\Scripts\python.exe" -m pip install --upgrade pip
 "%BASE%.venv\Scripts\python.exe" -m pip install -r "%BASE%requirements.txt"
+REM Umbenannte Kopie, damit der Dienst im Task-Manager erkennbar ist.
+copy /y "%BASE%.venv\Scripts\pythonw.exe" "%BASE%.venv\Scripts\ClaudeDiscordPresence.exe" >nul
 "%BASE%.venv\Scripts\python.exe" "%BASE%_check_env.py"
 endlocal

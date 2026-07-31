@@ -29,6 +29,17 @@ gibt es weder eine SmartScreen-Warnung noch typische Virenscanner-Fehlalarme.
 
 ## Einstellungen
 
+Nach der Installation als `.mcpb`: **Claude Desktop → Einstellungen →
+Erweiterungen → „Discord Presence for Claude Desktop"**. Die Felder unten
+erzeugt Claude Desktop selbst aus dem Manifest — eine eigene Oberfläche hat
+das Projekt bewusst nicht. Die daraus erzeugte Konfiguration liegt unter
+`%LOCALAPPDATA%\ClaudeDiscordPresence\config.json`.
+
+Wer aus dem Quelltext läuft, bearbeitet stattdessen `config.json` im
+Projektordner; dort gibt es deutlich mehr Stellschrauben als im Dialog.
+
+Der laufende Dienst heißt im Task-Manager **ClaudeDiscordPresence.exe**.
+
 | Feld | Bedeutung |
 |---|---|
 | Discord Application ID | optional — leer lassen für die mitgelieferte Anwendung |

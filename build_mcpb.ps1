@@ -24,6 +24,11 @@ $Zip = Join-Path $Cache "python-embed.zip"
 if (-not (Test-Path $Zip)) { Invoke-WebRequest -Uri $EmbedUrl -OutFile $Zip }
 Expand-Archive -Path $Zip -DestinationPath (Join-Path $Build "runtime") -Force
 
+# Interpreter umbenennen, damit der Dienst im Task-Manager als
+# "ClaudeDiscordPresence" erscheint und nicht als weiteres "python.exe".
+# Der Name muss mit dem command im Manifest uebereinstimmen.
+Rename-Item (Join-Path $Build "runtime\python.exe") "ClaudeDiscordPresence.exe"
+
 Write-Host "2/6  Abhaengigkeiten buendeln"
 & $Venv -m pip install --quiet --target (Join-Path $Build "server\lib") `
     --no-compile -r (Join-Path $Root "requirements.txt")
