@@ -34,9 +34,47 @@ Log nennt bei Nichterkennung stündlich alle gefundenen Kandidaten samt Pfad.
 
 ## Installation
 
-1. **`.mcpb` aus den [Releases](../../releases) herunterladen** und per
-   Doppelklick installieren.
-2. Fertig. Die Presence startet ab jetzt zusammen mit Claude Desktop.
+Ein Doppelklick auf die `.mcpb` funktioniert **nicht** — Claude Desktop
+meldet für diese Endung keine Dateizuordnung an. Installiert wird über das
+Entwickler-Menü der App, und das muss einmalig freigeschaltet werden.
+
+1. **`.mcpb` aus den [Releases](../../releases) herunterladen.**
+
+2. **Entwickler-Menü freischalten.** Lege diese Datei an:
+
+   | System | Pfad |
+   |---|---|
+   | Windows | `%APPDATA%\Claude\developer_settings.json` |
+   | Linux | `~/.config/Claude/developer_settings.json` |
+
+   Inhalt:
+
+   ```json
+   {"allowDevTools": true}
+   ```
+
+   **Ohne BOM speichern.** Schreibt der Editor eine Byte-Order-Mark an den
+   Anfang, startet Claude mit „Entwicklereinstellungen konnten nicht geladen
+   werden". Unter Windows also nicht mit PowerShells `Set-Content -Encoding
+   UTF8` erzeugen, sondern etwa so:
+
+   ```powershell
+   [System.IO.File]::WriteAllText("$env:APPDATA\Claude\developer_settings.json",
+     '{"allowDevTools": true}', (New-Object System.Text.UTF8Encoding $false))
+   ```
+
+3. **Claude Desktop komplett beenden** — unter Windows auch das Symbol im
+   Infobereich neben der Uhr — und neu starten.
+
+4. **Menüleiste öffnen** (Windows: einmal `Alt` drücken, sie ist
+   ausgeblendet) und wählen:
+   **Entwickler → Erweiterungen → Erweiterung installieren…**
+
+5. Die heruntergeladene `.mcpb` auswählen und die Rückfrage bestätigen.
+
+Die Presence startet ab jetzt zusammen mit Claude Desktop. Deinstallieren
+geht über Einstellungen → Erweiterungen; falls die Oberfläche das verweigert,
+hilft `tools/remove_extension.ps1` bei geschlossener App.
 
 Ohne weitere Angaben läuft alles über die mitgelieferte Discord-Anwendung —
 dann erscheinen deren Name und Bild in deinem Profil. Für einen eigenen Namen
