@@ -1,0 +1,4 @@
+# Linux-Werkzeuge brauchen LF. Mit CRLF scheitert schon der Shebang
+# ("bad interpreter: /usr/bin/env bash^M").
+*.sh text eol=lf
+tools/atspi_dump.py text eol=lf
