@@ -1112,6 +1112,15 @@ def main():
         )
         return
 
+    # COM fuer diesen Faden anfordern. Wird claude_rpc eingebettet und die
+    # Schleife nicht im Hauptfaden gestartet, scheitert sonst jeder
+    # UI-Automation-Aufruf mit "CoInitialize wurde nicht aufgerufen".
+    try:
+        import comtypes
+        comtypes.CoInitializeEx()
+    except Exception as exc:
+        logging.info("COM bereits initialisiert oder nicht noetig: %s", exc)
+
     process_names = {n.lower() for n in cfg.get("process_names", ["claude.exe"])}
     idle_timeout = cfg.get("idle_timeout_minutes", 25) * 60
     active_threshold = cfg.get("active_input_threshold_seconds", 90)

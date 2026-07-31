@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "claude-discord-presence", "version": "1.1.2"}
+SERVER_INFO = {"name": "claude-discord-presence", "version": "1.1.3"}
 
 
 def data_dir():
@@ -150,14 +150,21 @@ def handle(message, rpc):
     raise ValueError("Unbekannte Methode: %s" % method)
 
 
-def main():
-    os.environ["CLAUDE_RPC_CONFIG"] = build_config()
-    os.environ["CLAUDE_RPC_DATA_DIR"] = data_dir()
+def serve_stdio(rpc):
+    """JSON-RPC ueber stdin/stdout bedienen.
 
-    import claude_rpc as rpc
+    Laeuft im Nebenfaden, weil der Hauptfaden der Presence-Schleife gehoert.
+    Schliesst Claude Desktop die Leitung, endet der Prozess -- sonst liefe
+    die Schleife weiter, obwohl niemand mehr zuhoert.
+    """
+    try:
+        _serve(rpc)
+    finally:
+        sys.stderr.flush()
+        os._exit(0)
 
-    threading.Thread(target=rpc.main, name="presence", daemon=True).start()
 
+def _serve(rpc):
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -180,6 +187,25 @@ def main():
             continue
         if msg_id is not None and result is not None:
             write({"jsonrpc": "2.0", "id": msg_id, "result": result})
+
+
+def main():
+    os.environ["CLAUDE_RPC_CONFIG"] = build_config()
+    os.environ["CLAUDE_RPC_DATA_DIR"] = data_dir()
+
+    import claude_rpc as rpc
+
+    # Die Presence-Schleife gehoert in den Hauptfaden: uiautomation braucht
+    # dort das initialisierte COM, und pypresence seine Ereignisschleife.
+    # Andersherum verbindet sich pypresence noch, bleibt dann aber im ersten
+    # update() haengen -- ohne Fehlermeldung, der Prozess lebt einfach weiter.
+    threading.Thread(target=serve_stdio, args=(rpc,), name="mcp", daemon=True).start()
+    try:
+        rpc.main()
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+    # Kehrt zurueck, wenn schon eine Instanz sendet: dann nur noch bedienen.
+    threading.Event().wait()
 
 
 if __name__ == "__main__":

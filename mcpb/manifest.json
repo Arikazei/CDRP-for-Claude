@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "claude-discord-presence",
   "display_name": "Discord Presence for Claude Desktop",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Zeigt in Discord an, woran du gerade mit Claude Desktop arbeitest.",
   "long_description": "Inoffizielle Rich Presence fuer Claude Desktop. Liest ausschliesslich lokal: das Claude-Fenster ueber die Windows-UI-Automation (Modell und Statuszeile), den Werkzeugverlauf von Desktop Commander sowie die Sitzungs- und Nutzungsdateien der App. Weder Chatinhalte noch Chat-Titel werden erhoben; an Discord gehen nur Modellname, Statuszeile, Auslastung in Prozent und die Abo-Bezeichnung.",
   "author": {
