@@ -62,7 +62,35 @@ def is_paused():
 
 
 # Momentaufnahme fuer den MCP-Server (Werkzeug "presence_status").
+# Zusaetzlich auf Platte, weil Claude Desktop den Server mehrfach startet:
+# nur eine Instanz sendet, die andere beantwortet vielleicht die Aufrufe.
 LAST_STATE = {}
+_STATE_WRITTEN = 0.0
+
+
+def publish_state():
+    """Momentaufnahme in den Datenordner schreiben, hoechstens alle 10 s."""
+    global _STATE_WRITTEN
+    now = time.time()
+    if now - _STATE_WRITTEN < 10:
+        return
+    _STATE_WRITTEN = now
+    try:
+        (DATA_DIR / "state.json").write_text(
+            json.dumps(LAST_STATE, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def read_state():
+    """Momentaufnahme des sendenden Prozesses, sonst leer."""
+    if LAST_STATE:
+        return LAST_STATE
+    try:
+        return json.loads((DATA_DIR / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -1065,17 +1093,23 @@ class RichPresence:
 
 
 def main():
-    if not single_instance():
-        logging.error(
-            "Es laeuft bereits eine Instanz - Abbruch. Zwei Dienste wuerden "
-            "sich die Discord-Verbindung streitig machen."
-        )
-        return
-
+    # Erst pruefen, dann den Mutex belegen. Andersherum haelt eine Instanz,
+    # die gleich an der Konfiguration scheitert, die Sperre trotzdem fest
+    # und legt damit auch die gesunde zweite Instanz lahm.
     cfg = load_config()
     client_id = str(cfg.get("client_id", ""))
     if not client_id.isdigit():
-        logging.error("Keine gueltige client_id in config.json - Abbruch")
+        logging.error(
+            "Keine gueltige client_id in der Konfiguration (%r) - Abbruch",
+            client_id[:40],
+        )
+        return
+
+    if not single_instance():
+        logging.info(
+            "Es laeuft bereits eine Instanz - dieser Prozess beantwortet nur "
+            "Werkzeugaufrufe und sendet selbst keine Presence."
+        )
         return
 
     process_names = {n.lower() for n in cfg.get("process_names", ["claude.exe"])}
@@ -1212,6 +1246,7 @@ def main():
                 "paused": _PAUSED,
                 "limits": limits.status(),
             })
+            publish_state()
         except Exception as exc:
             logging.warning("Hauptschleife: %s", exc)
         time.sleep(poll)

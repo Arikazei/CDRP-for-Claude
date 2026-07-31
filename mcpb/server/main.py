@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "claude-discord-presence", "version": "1.1.0"}
+SERVER_INFO = {"name": "claude-discord-presence", "version": "1.1.1"}
 
 
 def data_dir():
@@ -29,8 +29,22 @@ def data_dir():
     return path
 
 
+def env_str(name):
+    """Wert einer Umgebungsvariablen, leer bei nicht ersetzten Platzhaltern.
+
+    Claude Desktop loest "${user_config.feld}" nicht auf, wenn das Feld im
+    Einstellungsdialog leer geblieben ist -- der Platzhalter kommt dann
+    woertlich an. Ohne diese Pruefung ueberschreibt er die Vorgabe aus
+    config.default.json mit Unsinn.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw or ("${" in raw and raw.endswith("}")):
+        return ""
+    return raw
+
+
 def env_flag(name, default=False):
-    raw = (os.environ.get(name) or "").strip().lower()
+    raw = env_str(name).lower()
     if not raw:
         return default
     return raw in ("1", "true", "yes", "on", "ja")
@@ -38,7 +52,7 @@ def env_flag(name, default=False):
 
 def env_int(name, default):
     try:
-        return int((os.environ.get(name) or "").strip())
+        return int(env_str(name))
     except ValueError:
         return default
 
@@ -48,20 +62,17 @@ def build_config():
     with open(os.path.join(HERE, "config.default.json"), encoding="utf-8") as handle:
         cfg = json.load(handle)
 
-    client_id = (os.environ.get("CLAUDE_RPC_CLIENT_ID") or "").strip()
+    client_id = env_str("CLAUDE_RPC_CLIENT_ID")
     if client_id:
         cfg["client_id"] = client_id
 
     cfg["idle_timeout_minutes"] = env_int("CLAUDE_RPC_IDLE_MINUTES", 25)
-
-    plan = (os.environ.get("CLAUDE_RPC_PLAN") or "").strip()
-    cfg.setdefault("plan", {})["override"] = plan
-
+    cfg.setdefault("plan", {})["override"] = env_str("CLAUDE_RPC_PLAN")
     cfg.setdefault("ui_limits", {})["max_age_minutes"] = env_int(
         "CLAUDE_RPC_LIMIT_MAX_AGE", 180
     )
 
-    idle = (os.environ.get("CLAUDE_RPC_IDLE_TEXT") or "").strip()
+    idle = env_str("CLAUDE_RPC_IDLE_TEXT")
     if idle:
         cfg.setdefault("texts", {})["open"] = [idle]
 
@@ -101,10 +112,12 @@ def call_tool(name, rpc):
         rpc.set_paused(False)
         return "Presence wieder aktiv."
     if name == "presence_status":
-        state = dict(rpc.LAST_STATE)
+        # read_state() faellt auf die Datei des sendenden Prozesses zurueck,
+        # falls dieser hier nur Werkzeugaufrufe beantwortet.
+        state = dict(rpc.read_state())
         if not state:
-            return "Noch keine Presence gesendet (Claude Desktop nicht aktiv?)."
-        state["paused"] = rpc.is_paused()
+            return ("Noch keine Presence gesendet. Sie erscheint, sobald du "
+                    "im Claude-Fenster arbeitest.")
         return json.dumps(state, ensure_ascii=False, indent=2)
     raise ValueError("Unbekanntes Werkzeug: %s" % name)
 
