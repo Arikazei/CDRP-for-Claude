@@ -10,8 +10,6 @@ Zustaende:
 
 Alle Texte und Timings sind in config.json einstellbar.
 """
-import ctypes
-import ctypes.wintypes
 import json
 import logging
 import os
@@ -21,6 +19,12 @@ from pathlib import Path
 import re
 
 from pypresence import Presence
+
+from hostplatform import (
+    FOCUS_SUPPORTED, IDLE_SUPPORTED, claude_config_dir, claude_running,
+    foreground_process_name, idle_seconds, init_com, iter_processes,
+    process_cmdline, process_path, single_instance,
+)
 
 try:
     import uiautomation as _uia
@@ -92,57 +96,6 @@ def read_state():
     except (OSError, ValueError):
         return {}
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
-
-
-TH32CS_SNAPPROCESS = 0x00000002
-PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000
-INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-MAX_PATH_LONG = 32768
-
-
-class LASTINPUTINFO(ctypes.Structure):
-    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
-
-
-class PROCESSENTRY32W(ctypes.Structure):
-    _fields_ = [
-        ("dwSize", ctypes.wintypes.DWORD),
-        ("cntUsage", ctypes.wintypes.DWORD),
-        ("th32ProcessID", ctypes.wintypes.DWORD),
-        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
-        ("th32ModuleID", ctypes.wintypes.DWORD),
-        ("cntThreads", ctypes.wintypes.DWORD),
-        ("th32ParentProcessID", ctypes.wintypes.DWORD),
-        ("pcPriClassBase", ctypes.c_long),
-        ("dwFlags", ctypes.wintypes.DWORD),
-        ("szExeFile", ctypes.c_wchar * 260),
-    ]
-
-
-# Rueckgabetypen setzen: ohne das schneidet ctypes 64-Bit-Handles auf
-# 32 Bit zurecht und die Aufrufe schlagen sporadisch fehl.
-kernel32.CreateToolhelp32Snapshot.restype = ctypes.wintypes.HANDLE
-kernel32.CreateToolhelp32Snapshot.argtypes = [
-    ctypes.wintypes.DWORD, ctypes.wintypes.DWORD,
-]
-kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
-kernel32.OpenProcess.argtypes = [
-    ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.DWORD,
-]
-kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
-kernel32.Process32FirstW.argtypes = [
-    ctypes.wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W),
-]
-kernel32.Process32NextW.argtypes = [
-    ctypes.wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W),
-]
-kernel32.QueryFullProcessImageNameW.argtypes = [
-    ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD,
-    ctypes.wintypes.LPWSTR, ctypes.POINTER(ctypes.wintypes.DWORD),
-]
-
 
 def load_config():
     with open(CONFIG_PATH, encoding="utf-8") as f:
@@ -150,107 +103,10 @@ def load_config():
 
 
 
-def idle_seconds():
-    """Sekunden seit letzter Tastatur-/Mauseingabe (systemweit)."""
-    info = LASTINPUTINFO()
-    info.cbSize = ctypes.sizeof(LASTINPUTINFO)
-    user32.GetLastInputInfo(ctypes.byref(info))
-    return max(0.0, (kernel32.GetTickCount() - info.dwTime) / 1000.0)
 
 
-def process_path(pid):
-    """Vollstaendiger Pfad zur EXE einer PID, sonst "".
-
-    Bewusst ueber ctypes statt psutil: das Paket bringt eine kompilierte
-    .pyd mit, und das gebuendelte MCPB soll ohne fremde Binaerdateien
-    auskommen (Virenscanner-Fehlalarme, Signaturfragen).
-    """
-    if not pid:
-        return ""
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return ""
-    try:
-        size = ctypes.wintypes.DWORD(MAX_PATH_LONG)
-        buf = ctypes.create_unicode_buffer(MAX_PATH_LONG)
-        if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
-            return buf.value
-        return ""
-    finally:
-        kernel32.CloseHandle(handle)
 
 
-def process_cmdline(pid):
-    """Befehlszeile einer PID ueber WMI, sonst "".
-
-    Wird gebraucht, um den Dienst unabhaengig vom verwendeten Interpreter
-    wiederzuerkennen -- am Pfad der EXE allein ist er nicht zu fassen.
-    """
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(Get-CimInstance Win32_Process -Filter \"ProcessId=%d\")"
-             ".CommandLine" % pid],
-            capture_output=True, text=True, timeout=15,
-            creationflags=0x08000000,
-        )
-        return (result.stdout or "").strip()
-    except Exception:
-        return ""
-
-
-def single_instance(name="claude_rpc_presence"):
-    """True, wenn keine zweite Instanz laeuft.
-
-    Ein benannter Mutex ist der einzige Schutz, der auch dann greift, wenn
-    die andere Instanz mit einem voellig anderen Python gestartet wurde.
-    Das Handle bleibt absichtlich fuer die Prozesslaufzeit offen.
-    """
-    global _INSTANCE_LOCK
-    kernel32.CreateMutexW.restype = ctypes.wintypes.HANDLE
-    kernel32.CreateMutexW.argtypes = [
-        ctypes.c_void_p, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR,
-    ]
-    _INSTANCE_LOCK = kernel32.CreateMutexW(None, False, "Local\\" + name)
-    return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
-
-
-_INSTANCE_LOCK = None
-
-
-def iter_processes():
-    """(pid, exe-name klein, voller Pfad) ueber alle sichtbaren Prozesse."""
-    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snapshot == INVALID_HANDLE_VALUE:
-        return
-    try:
-        entry = PROCESSENTRY32W()
-        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
-        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
-        while ok:
-            yield entry.th32ProcessID, (entry.szExeFile or "").lower(), None
-            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
-    finally:
-        kernel32.CloseHandle(snapshot)
-
-
-def foreground_process_name():
-    """Prozessname des Fensters im Vordergrund (klein geschrieben)."""
-    hwnd = user32.GetForegroundWindow()
-    if not hwnd:
-        return ""
-    pid = ctypes.wintypes.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    path = process_path(pid.value)
-    return os.path.basename(path).lower() if path else ""
-
-
-def claude_running(process_names):
-    for _pid, name, _path in iter_processes():
-        if name in process_names:
-            return True
-    return False
 
 
 
@@ -391,7 +247,7 @@ class ActivityWatcher:
 
     def __init__(self, cfg):
         self.cfg = cfg or {}
-        self.log_dir = Path(os.environ.get("APPDATA", "")) / "Claude" / "logs"
+        self.log_dir = claude_config_dir() / "logs"
 
     def get(self):
         if not self.cfg.get("enabled"):
@@ -903,9 +759,7 @@ class LocalSessionWatcher:
 
     def __init__(self, cfg):
         self.cfg = cfg or {}
-        self.root = (
-            Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code-sessions"
-        )
+        self.root = claude_config_dir() / "claude-code-sessions"
         self.next_refresh = 0.0
         self.text = None
 
@@ -969,8 +823,7 @@ class LocalUsageWatcher:
         raw = self.cfg.get("path")
         self.path = (
             Path(raw) if raw
-            else Path(os.environ.get("APPDATA", "")) / "Claude"
-            / "plan-usage-history.json"
+            else claude_config_dir() / "plan-usage-history.json"
         )
         self.next_refresh = 0.0
         self.text = None
@@ -1115,11 +968,7 @@ def main():
     # COM fuer diesen Faden anfordern. Wird claude_rpc eingebettet und die
     # Schleife nicht im Hauptfaden gestartet, scheitert sonst jeder
     # UI-Automation-Aufruf mit "CoInitialize wurde nicht aufgerufen".
-    try:
-        import comtypes
-        comtypes.CoInitializeEx()
-    except Exception as exc:
-        logging.info("COM bereits initialisiert oder nicht noetig: %s", exc)
+    init_com()
 
     process_names = {n.lower() for n in cfg.get("process_names", ["claude.exe"])}
     idle_timeout = cfg.get("idle_timeout_minutes", 25) * 60
@@ -1169,8 +1018,14 @@ def main():
                 time.sleep(max(poll, 15))
                 continue
 
-            focused = foreground_process_name() in process_names
-            currently_active = focused and idle_seconds() <= active_threshold
+            # Fokus und Leerlaufzeit sind nicht ueberall zu haben. Wo das
+            # Fenstersystem sie nicht hergibt (Wayland etwa verweigert beides
+            # von sich aus), gilt der laufende Prozess als bestes Signal --
+            # die Presence bleibt dann sichtbar, solange Claude laeuft.
+            focused = (foreground_process_name() in process_names
+                       if FOCUS_SUPPORTED else True)
+            ruhig = idle_seconds() <= active_threshold if IDLE_SUPPORTED else True
+            currently_active = focused and ruhig
             if currently_active:
                 last_active = now
 

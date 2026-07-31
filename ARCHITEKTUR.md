@@ -51,6 +51,31 @@ durch die Rotation nichts verloren.
 3. **Abo** — `plan_template` über `plan_override`, ergibt „Abonnement: Max 5x";
    praktisch statisch
 
+## Plattformschicht
+
+`hostplatform.py` bündelt alles, was pro Betriebssystem verschieden ist:
+Prozessliste, Pfad und Befehlszeile einer PID, Vordergrundfenster,
+Leerlaufzeit, Einzelinstanz-Sperre und der Datenordner der Claude-App.
+`claude_rpc.py` enthält seither keinen einzigen `ctypes`-Aufruf mehr.
+
+Zwei Zusagen sind ausdrücklich optional: `FOCUS_SUPPORTED` und
+`IDLE_SUPPORTED`. Wo sie `False` sind, darf sich der Aufrufer nicht auf
+Fokus und Leerlaufzeit verlassen — die Hauptschleife weicht dann auf
+„läuft Claude überhaupt" aus und lässt die Presence sichtbar, solange die
+App läuft. Das ist kein Schönheitsfehler: **Wayland gibt das aktive Fenster
+und die systemweite Leerlaufzeit aus Sicherheitsgründen gar nicht heraus**,
+und keine Bibliothek der Welt ändert daran etwas.
+
+| | Windows | Linux (Stufe 1) |
+|---|---|---|
+| Prozessliste | Toolhelp32 | `/proc` |
+| Pfad zur EXE | `QueryFullProcessImageNameW` | `/proc/<pid>/exe` |
+| Befehlszeile | WMI über PowerShell | `/proc/<pid>/cmdline` |
+| Einzelinstanz | benannter Mutex | `flock` auf einer Sperrdatei |
+| Datenordner | `%APPDATA%\Claude` | `~/.config/Claude` |
+| Fokus, Leerlauf | Win32 | offen (X11 wäre Stufe 2) |
+| Fenster auslesen | UI Automation | offen (AT-SPI wäre Stufe 3) |
+
 ## Module
 
 ### UIWatcher — die einzige Quelle für Cloud-Sessions

@@ -44,6 +44,7 @@ Write-Host "3/6  Standardkonfiguration erzeugen"
 
 Write-Host "4/6  Dateien kopieren"
 Copy-Item (Join-Path $Root "claude_rpc.py") (Join-Path $Build "server\claude_rpc.py")
+Copy-Item (Join-Path $Root "hostplatform.py") (Join-Path $Build "server\hostplatform.py")
 Copy-Item (Join-Path $Root "mcpb\server\main.py") (Join-Path $Build "server\main.py")
 Copy-Item (Join-Path $Root "mcpb\server\config.default.json") `
     (Join-Path $Build "server\config.default.json")
