@@ -23,8 +23,10 @@ SERVER_INFO = {"name": "claude-discord-presence", "version": "1.2.0"}
 
 
 def data_dir():
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    path = os.path.join(base, "ClaudeDiscordPresence")
+    """Ordner fuer Konfiguration, Log und Zustand -- pro System woanders."""
+    sys.path.insert(0, os.path.join(HERE, "lib"))
+    from hostplatform import app_data_dir
+    path = str(app_data_dir())
     os.makedirs(path, exist_ok=True)
     return path
 

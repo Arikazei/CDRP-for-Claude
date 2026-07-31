@@ -15,8 +15,15 @@
     "type": "python",
     "entry_point": "server/main.py",
     "mcp_config": {
-      "command": "${__dirname}/runtime/ClaudeDiscordPresence.exe",
+      "_kommentar": "Grundfall ist Linux mit dem System-Python; Windows bringt eine eigene Runtime mit, weil dort kein Python vorausgesetzt werden kann.",
+      "command": "python3",
       "args": ["${__dirname}/server/main.py"],
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/runtime/ClaudeDiscordPresence.exe",
+          "args": ["${__dirname}/server/main.py"]
+        }
+      },
       "env": {
         "CLAUDE_RPC_CLIENT_ID": "${user_config.client_id}",
         "CLAUDE_RPC_IDLE_MINUTES": "${user_config.idle_timeout_minutes}",
@@ -82,6 +89,9 @@
     }
   },
   "compatibility": {
-    "platforms": ["win32"]
+    "platforms": ["win32", "linux"],
+    "runtimes": {
+      "python": ">=3.9"
+    }
   }
 }

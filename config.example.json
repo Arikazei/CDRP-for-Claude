@@ -1,8 +1,6 @@
 {
   "client_id": "1529478569636659372",
-  "process_names": [
-    "claude.exe"
-  ],
+  "process_names": [],
   "idle_timeout_minutes": 25,
   "active_input_threshold_seconds": 90,
   "poll_interval_seconds": 5,

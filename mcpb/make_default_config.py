@@ -20,6 +20,9 @@ DEFAULT_CLIENT_ID = "1529478569636659372"
 
 cfg["client_id"] = DEFAULT_CLIENT_ID
 cfg["buttons"] = []
+# Leer heisst: die Plattformschicht entscheidet. "claude.exe" fest
+# einzutragen waere unter Linux falsch.
+cfg["process_names"] = []
 cfg.setdefault("plan", {})["override"] = ""
 cfg.setdefault("local_usage", {})["enabled"] = True
 

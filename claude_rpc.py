@@ -21,9 +21,9 @@ import re
 from pypresence import Presence
 
 from hostplatform import (
-    FOCUS_SUPPORTED, IDLE_SUPPORTED, claude_config_dir, claude_running,
-    foreground_process_name, idle_seconds, init_com, iter_processes,
-    process_cmdline, process_path, single_instance,
+    DEFAULT_PROCESS_NAMES, FOCUS_SUPPORTED, IDLE_SUPPORTED, claude_config_dir,
+    claude_running, foreground_process_name, idle_seconds, init_com,
+    iter_processes, process_cmdline, process_path, single_instance,
 )
 
 try:
@@ -970,7 +970,11 @@ def main():
     # UI-Automation-Aufruf mit "CoInitialize wurde nicht aufgerufen".
     init_com()
 
-    process_names = {n.lower() for n in cfg.get("process_names", ["claude.exe"])}
+    # Leer gelassen heisst: die Plattform entscheidet. Ein fest eingetragenes
+    # "claude.exe" waere unter Linux schlicht falsch.
+    process_names = {n.lower()
+                     for n in (cfg.get("process_names") or DEFAULT_PROCESS_NAMES)}
+    logging.info("Erkenne Claude an: %s", ", ".join(sorted(process_names)))
     idle_timeout = cfg.get("idle_timeout_minutes", 25) * 60
     active_threshold = cfg.get("active_input_threshold_seconds", 90)
     poll = cfg.get("poll_interval_seconds", 5)

@@ -160,6 +160,12 @@ if IS_WINDOWS:
     def claude_config_dir():
         return Path(os.environ.get("APPDATA", "")) / "Claude"
 
+    def app_data_dir():
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return Path(base) / "ClaudeDiscordPresence"
+
+    DEFAULT_PROCESS_NAMES = ("claude.exe",)
+
 
 else:
     # Linux (Stufe 1): alles, was ohne Fenstersystem auskommt.
@@ -223,6 +229,15 @@ else:
     def claude_config_dir():
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
         return Path(base) / "Claude"
+
+    def app_data_dir():
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        return Path(base) / "ClaudeDiscordPresence"
+
+    # Das Debian-Paket installiert die Anwendung als "claude-desktop"; je
+    # nach Start kann der Hauptprozess auch schlicht "claude" heissen.
+    # Beide Namen sind vertreten, damit die Erkennung nicht daran haengt.
+    DEFAULT_PROCESS_NAMES = ("claude-desktop", "claude")
 
 
 def claude_running(process_names):
