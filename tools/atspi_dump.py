@@ -55,7 +55,15 @@ for schluessel in ("XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DESKTOP_SESSION",
                    "WAYLAND_DISPLAY", "DISPLAY"):
     print("  %-20s %s" % (schluessel, os.environ.get(schluessel, "(nicht gesetzt)")))
 
-sitzung = open_dbus_connection(bus="SESSION")
+if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
+    sys.exit("\n  Kein Sitzungs-D-Bus gefunden (DBUS_SESSION_BUS_ADDRESS fehlt).\n"
+             "  Das Skript muss in der laufenden Desktop-Sitzung starten,\n"
+             "  nicht per SSH oder aus einer Textkonsole heraus.")
+
+try:
+    sitzung = open_dbus_connection(bus="SESSION")
+except Exception as exc:
+    sys.exit("\n  Verbindung zum Sitzungs-D-Bus fehlgeschlagen: %s" % exc)
 
 print()
 print("=" * 62)
