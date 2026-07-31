@@ -7,17 +7,23 @@ Beantwortet vier Fragen, statt sie zu raten:
   3. Taucht das Claude-Fenster im AT-SPI-Baum auf, und wie heissen die Knoten?
   4. Laesst sich die Leerlaufzeit ueber D-Bus abfragen?
 
-Aufruf:
-    pip install --user jeepney      # reines Python, kein Compiler noetig
+Aufruf (fertig gepacktes Programm, keine Installation noetig):
+    chmod +x atspi-dump
+    ./atspi-dump
+
+Aufruf aus dem Quelltext (dann wird jeepney gebraucht):
+    pip install --user jeepney
     python3 atspi_dump.py
 
-Ausgabe bitte vollstaendig zurueckschicken.
+Wichtig: in der laufenden Desktop-Sitzung starten, nicht per SSH,
+und mit geoeffnetem Claude-Fenster. Ausgabe bitte vollstaendig
+zurueckschicken.
 """
 import os
 import sys
 
 try:
-    from jeepney import DBusAddress, new_method_call
+    from jeepney import DBusAddress, MessageType, new_method_call
     from jeepney.io.blocking import open_dbus_connection
 except ImportError:
     sys.exit("Bitte zuerst: pip install --user jeepney")
@@ -26,26 +32,47 @@ ATSPI = "org.a11y.atspi.Accessible"
 ROOT = "/org/a11y/atspi/accessible/root"
 
 
+class Fehler(object):
+    """Fehlgeschlagener Aufruf. Traegt den Grund mit, statt zu werfen."""
+
+    def __init__(self, text):
+        self.text = str(text)
+
+    def __str__(self):
+        return "-- %s" % self.text
+
+    __repr__ = __str__
+
+
 def hole(conn, bus_name, pfad, schnittstelle, methode, signatur=None, args=None):
-    """Einzelner D-Bus-Aufruf, gibt None statt zu werfen."""
+    """Einzelner D-Bus-Aufruf. Gibt den Rumpf zurueck oder ein Fehler-Objekt.
+
+    Wichtig: eine D-Bus-Fehlerantwort ist eine gueltige Nachricht, keine
+    Ausnahme. Ohne die Pruefung auf message_type wuerde der Fehlertext als
+    Nutzdaten weitergereicht.
+    """
     ziel = DBusAddress(pfad, bus_name=bus_name, interface=schnittstelle)
     try:
         antwort = conn.send_and_get_reply(
             new_method_call(ziel, methode, signatur, args))
-        return antwort.body
     except Exception as exc:
-        return ("FEHLER", str(exc))
+        return Fehler(exc)
+    if antwort.header.message_type is MessageType.error:
+        grund = antwort.body[0] if antwort.body else "unbekannter D-Bus-Fehler"
+        return Fehler(grund)
+    return antwort.body
 
 
 def eigenschaft(conn, bus_name, pfad, schnittstelle, name):
+    """Eine Eigenschaft lesen. Properties.Get liefert eine Variante (Typ, Wert)."""
     ergebnis = hole(conn, bus_name, pfad, "org.freedesktop.DBus.Properties",
                     "Get", "ss", (schnittstelle, name))
-    if ergebnis and ergebnis[0] == "FEHLER":
+    if isinstance(ergebnis, Fehler):
         return ergebnis
     try:
         return ergebnis[0][1]
     except Exception:
-        return None
+        return Fehler("unerwartete Antwort: %r" % (ergebnis,))
 
 
 print("=" * 62)
@@ -57,7 +84,7 @@ for schluessel in ("XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DESKTOP_SESSION",
 
 if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
     sys.exit("\n  Kein Sitzungs-D-Bus gefunden (DBUS_SESSION_BUS_ADDRESS fehlt).\n"
-             "  Das Skript muss in der laufenden Desktop-Sitzung starten,\n"
+             "  Das Programm muss in der laufenden Desktop-Sitzung starten,\n"
              "  nicht per SSH oder aus einer Textkonsole heraus.")
 
 try:
@@ -75,39 +102,72 @@ for name in ("IsEnabled", "ScreenReaderEnabled"):
                           "org.a11y.Status", name)))
 adresse = hole(sitzung, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
                "GetAddress")
-print("  Adresse des a11y-Busses      %s" % (adresse,))
+if isinstance(adresse, Fehler):
+    print("  Adresse des a11y-Busses      %s" % adresse)
+else:
+    print("  Adresse des a11y-Busses      %s" % (adresse[0],))
+
+
+def leerlauf_pruefen():
+    """Abschnitt 4. Steht als Funktion da, damit sie auch nach einem
+    fruehen Ausstieg in Abschnitt 3 noch laeuft."""
+    print()
+    print("=" * 62)
+    print("4. Leerlaufzeit ueber D-Bus")
+    print("=" * 62)
+    for dienst, pfad, schnittstelle, methode in (
+            ("org.freedesktop.ScreenSaver", "/ScreenSaver",
+             "org.freedesktop.ScreenSaver", "GetSessionIdleTime"),
+            ("org.gnome.Mutter.IdleMonitor", "/org/gnome/Mutter/IdleMonitor/Core",
+             "org.gnome.Mutter.IdleMonitor", "GetIdletime"),
+    ):
+        ergebnis = hole(sitzung, dienst, pfad, schnittstelle, methode)
+        if isinstance(ergebnis, Fehler):
+            print("  %-38s %s" % (methode, ergebnis))
+        else:
+            wert = ergebnis[0] if ergebnis else None
+            zusatz = ""
+            if isinstance(wert, int):
+                zusatz = "  (entspricht %.1f s, falls Millisekunden)" % (wert / 1000.0)
+            print("  %-38s %s%s" % (methode, wert, zusatz))
+    print()
+    print("Fertig. Bitte die gesamte Ausgabe zurueckschicken.")
 
 
 print()
 print("=" * 62)
 print("3. AT-SPI-Baum")
 print("=" * 62)
-if not adresse or adresse[0] == "FEHLER":
+if isinstance(adresse, Fehler):
     print("  Kein a11y-Bus erreichbar. Unter KDE hilft meist:")
-    print("    sudo apt install at-spi2-core")
+    print("    sudo apt install at-spi2-core     (bzw. das Paket der Distribution)")
     print("  und Claude einmal mit --force-renderer-accessibility starten.")
+    leerlauf_pruefen()
     sys.exit(0)
 
 try:
     a11y = open_dbus_connection(bus=adresse[0])
 except Exception as exc:
-    sys.exit("  Verbindung zum a11y-Bus fehlgeschlagen: %s" % exc)
+    print("  Verbindung zum a11y-Bus fehlgeschlagen: %s" % exc)
+    leerlauf_pruefen()
+    sys.exit(0)
 
 
 def kinder(bus_name, pfad):
     ergebnis = hole(a11y, bus_name, pfad, ATSPI, "GetChildren")
-    if not ergebnis or ergebnis[0] == "FEHLER":
+    if isinstance(ergebnis, Fehler) or not ergebnis:
         return []
     return ergebnis[0]
 
 
 def name_von(bus_name, pfad):
-    return eigenschaft(a11y, bus_name, pfad, ATSPI, "Name")
+    wert = eigenschaft(a11y, bus_name, pfad, ATSPI, "Name")
+    return "" if isinstance(wert, Fehler) else wert
 
 
 def rolle_von(bus_name, pfad):
     ergebnis = hole(a11y, bus_name, pfad, ATSPI, "GetRoleName")
-    if not ergebnis or ergebnis[0] == "FEHLER":
+    if isinstance(ergebnis, Fehler) or not ergebnis:
         return "?"
     return ergebnis[0]
 
@@ -126,7 +186,8 @@ if not treffer:
     print("  Claude nicht im Baum. Das heisst fast immer: Electron hat die")
     print("  Barrierefreiheit nicht eingeschaltet. Versuch einmal")
     print("    claude-desktop --force-renderer-accessibility")
-    print("  und lass dieses Skript erneut laufen.")
+    print("  und lass dieses Programm erneut laufen.")
+    leerlauf_pruefen()
     sys.exit(0)
 
 
@@ -158,17 +219,4 @@ for bus_name, pfad, titel in treffer:
 print()
 print("  Knoten insgesamt: %d" % gezaehlt)
 
-print()
-print("=" * 62)
-print("4. Leerlaufzeit ueber D-Bus")
-print("=" * 62)
-for dienst, pfad, schnittstelle, methode in (
-        ("org.freedesktop.ScreenSaver", "/ScreenSaver",
-         "org.freedesktop.ScreenSaver", "GetSessionIdleTime"),
-        ("org.gnome.Mutter.IdleMonitor", "/org/gnome/Mutter/IdleMonitor/Core",
-         "org.gnome.Mutter.IdleMonitor", "GetIdletime"),
-):
-    print("  %-38s %s" % (methode, hole(sitzung, dienst, pfad, schnittstelle,
-                                        methode)))
-print()
-print("Fertig. Bitte die gesamte Ausgabe zurueckschicken.")
+leerlauf_pruefen()
