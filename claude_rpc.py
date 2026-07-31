@@ -21,9 +21,9 @@ import re
 from pypresence import Presence
 
 from hostplatform import (
-    DEFAULT_PROCESS_NAMES, FOCUS_SUPPORTED, IDLE_SUPPORTED, claude_config_dir,
-    claude_running, foreground_process_name, idle_seconds, init_com,
-    iter_processes, process_cmdline, process_path, single_instance,
+    DEFAULT_PROCESS_NAMES, FOCUS_SUPPORTED, IDLE_SUPPORTED, claude_candidates,
+    claude_config_dir, claude_running, foreground_process_name, idle_seconds,
+    init_com, iter_processes, process_cmdline, process_path, single_instance,
 )
 
 try:
@@ -1004,6 +1004,7 @@ def main():
 
     session_start = None
     last_active = 0.0
+    last_hint = 0.0
     logging.info("claude_rpc gestartet")
 
     while True:
@@ -1019,6 +1020,18 @@ def main():
                 presence.clear()
                 session_start = None
                 last_active = 0.0
+                # Heisst der Hauptprozess auf diesem System anders, sitzt man
+                # sonst vor einer stummen Presence und raet. Hoechstens
+                # stuendlich, damit das Log nicht zulaeuft.
+                if now - last_hint >= 3600:
+                    last_hint = now
+                    kandidaten = claude_candidates()
+                    if kandidaten:
+                        logging.info(
+                            "Claude nicht erkannt. Gefunden wurden: %s",
+                            "; ".join("%s (%s)" % (n, p or "?")
+                                      for _i, n, p in kandidaten[:5]),
+                        )
                 time.sleep(max(poll, 15))
                 continue
 

@@ -234,10 +234,12 @@ else:
         base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
         return Path(base) / "ClaudeDiscordPresence"
 
-    # Das Debian-Paket installiert die Anwendung als "claude-desktop"; je
-    # nach Start kann der Hauptprozess auch schlicht "claude" heissen.
-    # Beide Namen sind vertreten, damit die Erkennung nicht daran haengt.
-    DEFAULT_PROCESS_NAMES = ("claude-desktop", "claude")
+    # Das Debian-Paket installiert die Anwendung als "claude-desktop".
+    # Der nackte Name "claude" gehoert der Kommandozeilenfassung
+    # (/opt/claude-code/bin/claude) und ist deshalb bewusst NICHT dabei --
+    # sonst zeigt die Presence "Claude Desktop", waehrend nur die CLI
+    # laeuft. Auf echtem Linux gegengeprueft.
+    DEFAULT_PROCESS_NAMES = ("claude-desktop",)
 
 
 def claude_running(process_names):
@@ -246,6 +248,20 @@ def claude_running(process_names):
         if name in process_names:
             return True
     return False
+
+
+def claude_candidates():
+    """Prozesse, deren Name nach Claude aussieht, mit Pfad.
+
+    Nur fuer die Fehlersuche: heisst der Hauptprozess auf einem System
+    anders als erwartet, findet man ihn hier, statt vor einer stummen
+    Presence zu sitzen und zu raten.
+    """
+    treffer = []
+    for pid, name, _ in iter_processes():
+        if "claude" in name:
+            treffer.append((pid, name, process_path(pid)))
+    return treffer
 
 
 def init_com():
