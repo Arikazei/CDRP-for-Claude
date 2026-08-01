@@ -69,6 +69,25 @@ for _bus, _pfad, name in anwendungen:
     print("    %s" % name)
 
 knoten = ld.atspi_knoten("claude")
+if knoten and len(knoten) < 30 and AENDERN:
+    # Nur das Fenstergeruest, kein Inhalt: Chromium baut den vollen Baum
+    # erst auf, wenn sich ein Bildschirmleser anmeldet. Das kostet Rechenzeit,
+    # deshalb macht es das nicht von sich aus.
+    print()
+    print("  Nur %d Knoten -- das ist das Fenstergeruest ohne Inhalt." % len(knoten))
+    print("  Versuch: Bildschirmleser anmelden und noch einmal schauen ...")
+    ld.bildschirmleser_melden(True)
+    time.sleep(2.5)
+    erneut = ld.atspi_knoten("claude")
+    print("  Knoten danach: %d (vorher %d)" % (len(erneut), len(knoten)))
+    if len(erneut) > len(knoten):
+        print("  Das hat gewirkt -- der Inhalt ist jetzt lesbar.")
+        knoten = erneut
+    else:
+        print("  Unveraendert. Dann hilft nur der Start mit dem Schalter:")
+        print("    claude-desktop --force-renderer-accessibility")
+        ld.bildschirmleser_melden(False)
+
 if not knoten:
     print()
     print("  Claude nicht im Baum. Zwei moegliche Gruende:")
@@ -81,8 +100,10 @@ else:
     print()
     print("  Knoten unter Claude: %d" % len(knoten))
     for tiefe, rolle, name in knoten:
-        if name:
-            print("%s%-18s %s" % ("  " * (tiefe + 1), rolle, str(name)[:110]))
+        # Auch namenlose Knoten zeigen: ob ueberhaupt ein "document web"
+        # auftaucht, entscheidet darueber, ob der Inhalt lesbar ist.
+        print("%s%-18s %s" % ("  " * (tiefe + 1), rolle,
+                              str(name)[:110] if name else "(ohne Namen)"))
 
 
 ueberschrift("4. Leerlaufzeit")
@@ -143,7 +164,25 @@ if antwort is None:
     print("  Die Presence nimmt dann 'im Vordergrund' an.")
 else:
     print("  Claude im Vordergrund: %s" % ("ja" if antwort else "nein"))
-    print("  (Wenn das Claude-Fenster gerade oben liegt, muss hier ja stehen.)")
+    print("  Aktiv ist gerade:      %s" % (ld.atspi_aktive_anwendung() or "(nichts)"))
+    print()
+    print("  Gemeint ist der Tastaturfokus, nicht die Sichtbarkeit. Wer dieses")
+    print("  Programm in einem Terminal startet, hat damit das Terminal")
+    print("  fokussiert -- 'nein' ist dann die richtige Antwort, auch wenn das")
+    print("  Claude-Fenster daneben offen liegt.")
+    print()
+    print("  Gegenprobe: 15 s lang wird jede Sekunde geprueft. Bitte jetzt auf")
+    print("  das Claude-Fenster klicken und dann wieder zurueck.")
+    verlauf = []
+    for _ in range(15):
+        verlauf.append("J" if ld.claude_im_vordergrund() else ".")
+        time.sleep(1)
+    print("    %s   (J = Claude aktiv, . = etwas anderes)" % "".join(verlauf))
+    if "J" in "".join(verlauf):
+        print("    Der Wechsel wird erkannt -- die Fokuserkennung traegt.")
+    else:
+        print("    Kein einziges J. Entweder wurde nicht geklickt, oder der")
+        print("    Zustand 'aktiv' kommt bei diesem Fenster nicht an.")
 
 print()
 print("Fertig. Bitte die gesamte Ausgabe zurueckschicken.")

@@ -471,6 +471,41 @@ def barrierefreiheit_status():
                         "org.a11y.Status", "IsEnabled")
 
 
+def bildschirmleser_melden(an=True):
+    """org.a11y.Status.ScreenReaderEnabled setzen.
+
+    IsEnabled allein bewegt Chromium nur dazu, das Fenstergeruest zu
+    veroeffentlichen -- der Inhalt der Seite bleibt aus. Den vollen Baum
+    baut es erst auf, wenn sich ein Bildschirmleser anmeldet, weil das
+    teuer ist und sonst niemand danach fragt. Dieser Schalter ist genau
+    diese Anmeldung, ohne dass ein Bildschirmleser laufen muss.
+
+    Deutlich eingreifender als IsEnabled: andere Anwendungen koennen ihr
+    Verhalten daran ausrichten. Deshalb nur auf ausdruecklichen Wunsch.
+    """
+    conn = _sitzungsbus()
+    if conn is None:
+        return False
+    antwort = _aufruf(conn, "org.a11y.Bus", "/org/a11y/bus",
+                      "org.freedesktop.DBus.Properties", "Set", "ssv",
+                      ("org.a11y.Status", "ScreenReaderEnabled", ("b", bool(an))))
+    return antwort is not None
+
+
+def bildschirmleser_status():
+    return _eigenschaft(_sitzungsbus(), "org.a11y.Bus", "/org/a11y/bus",
+                        "org.a11y.Status", "ScreenReaderEnabled")
+
+
+def atspi_aktive_anwendung():
+    """Name der Anwendung, deren Fenster gerade aktiv ist, oder ""."""
+    for bus_name, pfad, name in atspi_anwendungen():
+        for fenster_bus, fenster_pfad in _kinder(bus_name, pfad):
+            if _ist_aktiv(fenster_bus, fenster_pfad):
+                return name
+    return ""
+
+
 def barrierefreiheit_einschalten():
     """org.a11y.Status.IsEnabled auf true setzen.
 
