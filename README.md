@@ -38,12 +38,27 @@ der einzige desktopübergreifende Weg: KDE und GNOME geben das aktive Fenster
 aus Sicherheitsgründen nicht heraus, AT-SPI dagegen ist ein
 freedesktop-Standard über D-Bus und damit unabhängig vom Fenstersystem.
 Trägt keiner der Wege, bleibt die Presence sichtbar, solange Claude läuft —
-sie schaltet dann nur nicht mehr auf „abwesend".
+sie schaltet dann nur nicht mehr auf „abwesend". Dasselbe gilt, wenn der
+Desktop den Zustand „aktiv" zwar kennt, aber nicht pflegt (beobachtet unter
+Plasma 6): meldet ihn kein einziges Fenster auf dem Bus, wird das Signal
+als unbrauchbar gewertet statt als „Claude ist nie im Vordergrund".
 
-**Was noch fehlt:** Das Auslesen des Claude-Fensters gibt es nur unter
-Windows. Damit fehlen unter Linux das Modell reiner Cloud-Chats, die
-Live-Statuszeile und das modellspezifische Limit. Die Grundlage dafür steht
-mit `atspi_knoten()` bereits; was fehlt, ist der Parser für die Knotennamen.
+**Das Claude-Fenster selbst** (Live-Statuszeile, Modell reiner Cloud-Chats,
+modellspezifisches Limit) wird ab v1.4.0 auch unter Linux gelesen, über
+denselben Auswerter wie unter Windows. Eine Bedingung stellt Chromium:
+Seiteninhalt veröffentlicht es nur, wenn ein Bildschirmleser angemeldet
+ist. Der Daemon meldet deshalb beim Start einen an
+(`ui_watcher.announce_screen_reader`) — das wirkt erst beim **nächsten
+Start von Claude**. Bleibt der Baum danach trotzdem beim Fenstergerüst
+(das Protokoll sagt es), hilft der Chromium-Schalter
+`--force-renderer-accessibility`. Dauerhaft setzt man ihn über eine
+eigene Startdatei:
+
+```bash
+cp /usr/share/applications/com.anthropic.Claude.desktop ~/.local/share/applications/
+sed -i 's|^Exec=claude-desktop|Exec=claude-desktop --force-renderer-accessibility|' \
+  ~/.local/share/applications/com.anthropic.Claude.desktop
+```
 
 Was dein Rechner hergibt, sagt dir das Diagnoseprogramm aus dem Release:
 
