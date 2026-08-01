@@ -160,8 +160,12 @@ if not ld.leerlauf_verfuegbar():
 ueberschrift("5. Fokus ueber AT-SPI")
 antwort = ld.claude_im_vordergrund()
 if antwort is None:
-    print("  Nicht beantwortbar (kein a11y-Bus oder Claude nicht im Baum).")
-    print("  Die Presence nimmt dann 'im Vordergrund' an.")
+    print("  Nicht beantwortbar. Drei moegliche Gruende: kein a11y-Bus,")
+    print("  Claude nicht im Baum, oder -- der haeufigste -- kein Fenster")
+    print("  irgendeiner Anwendung meldet 'aktiv'. Letzteres heisst nicht")
+    print("  'niemand arbeitet', sondern 'diese Arbeitsumgebung pflegt den")
+    print("  Zustand nicht'. Die Presence nimmt dann 'im Vordergrund' an.")
+    print("  Aktiv ist gerade:      %s" % (ld.atspi_aktive_anwendung() or "(nichts)"))
 else:
     print("  Claude im Vordergrund: %s" % ("ja" if antwort else "nein"))
     print("  Aktiv ist gerade:      %s" % (ld.atspi_aktive_anwendung() or "(nichts)"))
