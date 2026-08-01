@@ -36,8 +36,7 @@
   "ui_model": {
     "enabled": false,
     "refresh_seconds": 10,
-    "template": "using cowork with {model}",
-    "_hinweis": "Nur Windows. Ausserhalb davon liefert ui_watcher das Modell im selben Durchlauf mit."
+    "template": "using cowork with {model}"
   },
   "ui_watcher": {
     "enabled": true,
@@ -52,8 +51,7 @@
     "composer_pattern": "(Anfrage an Claude|Nachricht|Message Claude|Reply to Claude)",
     "announce_screen_reader": true,
     "scan_budget_seconds": 4.0,
-    "atspi_match": "claude",
-    "_hinweis_linux": "announce_screen_reader meldet unter Linux einen Bildschirmleser an - ohne das veroeffentlicht Chromium nur das Fenstergeruest und die erste Zeile bleibt leer. Der Schalter wirkt erst beim naechsten Start von Claude. scan_budget_seconds deckelt die Zeit je Durchlauf, atspi_match den Anwendungsnamen im AT-SPI-Baum."
+    "atspi_match": "claude"
   },
   "tool_history": {
     "enabled": true,
