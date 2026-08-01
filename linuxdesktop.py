@@ -608,14 +608,21 @@ def atspi_anwendungen():
     return ergebnis
 
 
-def atspi_knoten(suchbegriff="claude", hoechstens=4000):
+def atspi_knoten(suchbegriff="claude", hoechstens=4000, frist_s=None):
     """Baum der passenden Anwendung als flache Liste (tiefe, rolle, name).
 
     Dieselbe Quelle, aus der spaeter der Linux-UIWatcher liest. Die
     Deckelung ist Absicht: ein Chatfenster mit langer Geschichte hat
     zehntausende Knoten, und wir brauchen immer nur die obersten.
+
+    frist_s deckelt zusaetzlich die Zeit statt nur die Menge. Jeder Knoten
+    kostet drei D-Bus-Runden (Kinder, Rolle, Name); wie viele Knoten in
+    einer Sekunde durchlaufen sind, haengt an der Last des a11y-Busses und
+    laesst sich vorher nicht ausrechnen. Ohne Frist stuende die
+    Hauptschleife der Presence im ungluecklichen Fall sekundenlang im Baum.
     """
     knoten = []
+    ende = None if not frist_s else time.time() + float(frist_s)
 
     def rolle(bus_name, pfad):
         rumpf = _aufruf(_a11y_bus(), bus_name, pfad, ATSPI, "GetRoleName")
@@ -627,6 +634,8 @@ def atspi_knoten(suchbegriff="claude", hoechstens=4000):
         for kind_bus, kind_pfad in _kinder(bus_name, pfad):
             if len(knoten) >= hoechstens:
                 return
+            if ende is not None and time.time() > ende:
+                return
             knoten.append((tiefe, rolle(kind_bus, kind_pfad),
                            _name(kind_bus, kind_pfad)))
             ablaufen(kind_bus, kind_pfad, tiefe + 1)
@@ -635,6 +644,35 @@ def atspi_knoten(suchbegriff="claude", hoechstens=4000):
         if suchbegriff in name.lower():
             ablaufen(bus_name, pfad, 0)
     return knoten
+
+
+GEGENPROBE_TAKT = 30.0    # Sekunden zwischen zwei Gegenproben
+
+_fokus_probe_zeit = 0.0
+_fokus_probe_wert = False
+_fokus_gemeldet = False
+
+
+def _irgendwo_aktiv(hoechstens_anwendungen=40, hoechstens_fenster=8):
+    """Meldet irgendein Fenster auf dem Bus den Zustand "aktiv"?
+
+    Das ist die Gegenprobe zur Fokusfrage. Ohne sie ist ein "Claude ist
+    nicht aktiv" nicht von "hier meldet ueberhaupt niemand etwas" zu
+    unterscheiden -- und genau das ist unter Plasma 6 der Normalfall: in
+    einer Viertelstunde Beobachtung trug kein einziges Fenster irgendeiner
+    Anwendung den Zustand, obwohl durchgehend getippt wurde. Ein einzelner
+    Fund an anderer Stelle war zudem veraltet, der Zustand wird also nicht
+    nur ausgelassen, sondern auch nicht zurueckgenommen.
+
+    Bewusst flach und gedeckelt: nur die obersten Kinder jeder Anwendung
+    sind Fenster, und tiefer zu suchen kostet Runden, ohne mehr zu wissen.
+    """
+    for bus_name, pfad, _name_ in atspi_anwendungen()[:hoechstens_anwendungen]:
+        for fenster_bus, fenster_pfad in _kinder(
+                bus_name, pfad)[:hoechstens_fenster]:
+            if _ist_aktiv(fenster_bus, fenster_pfad):
+                return True
+    return False
 
 
 def claude_im_vordergrund(suchbegriff="claude"):
@@ -646,8 +684,17 @@ def claude_im_vordergrund(suchbegriff="claude"):
     schnittstelle dagegen schon -- sie ist ein freedesktop-Standard und
     laeuft ueber D-Bus, also unabhaengig vom Fenstersystem.
 
-    Gibt None zurueck, wenn die Frage hier nicht beantwortbar ist.
+    Drei Antworten, nicht zwei:
+      True   eines von Claudes Fenstern meldet "aktiv"
+      False  ein anderes Fenster meldet "aktiv" -- Claude ist wirklich weg
+      None   niemand meldet "aktiv", oder Claude fehlt im Baum; die Frage
+             ist auf diesem Desktop dann nicht beantwortbar
+
+    Der Aufrufer macht aus None ein "im Vordergrund": eine Presence zu viel
+    ist besser als eine, die grundlos verschwindet. Die Abwesenheit erkennt
+    weiterhin die Leerlaufmessung, die hier unabhaengig davon laeuft.
     """
+    global _fokus_probe_zeit, _fokus_probe_wert, _fokus_gemeldet
     if _a11y_bus() is None:
         return None
     gefunden = False
@@ -657,5 +704,32 @@ def claude_im_vordergrund(suchbegriff="claude"):
         gefunden = True
         for fenster_bus, fenster_pfad in _kinder(bus_name, pfad):
             if _ist_aktiv(fenster_bus, fenster_pfad):
+                if _fokus_gemeldet:
+                    _fokus_gemeldet = False
+                    logging.info("Fokussignal traegt wieder: Claude meldet "
+                                 "sich als aktiv")
                 return True
-    return False if gefunden else None
+    if not gefunden:
+        return None
+
+    # Die Gegenprobe laeuft ueber alle Anwendungen und ist damit deutlich
+    # teurer als die Frage nach Claude allein. Sie aendert ihr Ergebnis aber
+    # nur, wenn sich die ganze Arbeitsumgebung anders verhaelt -- einmal je
+    # halbe Minute reicht dafuer.
+    jetzt = time.time()
+    if jetzt - _fokus_probe_zeit > GEGENPROBE_TAKT:
+        _fokus_probe_zeit = jetzt
+        _fokus_probe_wert = _irgendwo_aktiv()
+    if _fokus_probe_wert:
+        if _fokus_gemeldet:
+            _fokus_gemeldet = False
+            logging.info("Fokussignal traegt wieder: ein anderes Fenster "
+                         "meldet sich als aktiv")
+        return False
+    if not _fokus_gemeldet:
+        _fokus_gemeldet = True
+        logging.info(
+            "Fokussignal unbrauchbar: kein Fenster auf dem AT-SPI-Bus meldet "
+            "'aktiv'. Die Presence bleibt sichtbar, solange Claude laeuft; "
+            "die Abwesenheit erkennt weiterhin die Leerlaufmessung.")
+    return None

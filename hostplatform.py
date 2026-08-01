@@ -11,6 +11,9 @@ claude_rpc.py kennt danach nur noch diese Schnittstelle:
     idle_configure(sekunden)    Schwelle setzen, bevor gemessen wird
     single_instance(name)       False, wenn schon eine Instanz laeuft
     claude_config_dir()         Datenordner der Claude-Desktop-App
+    accessibility_enable()      Barrierefreiheitsbruecke anschalten (Linux)
+    ui_tree_supported()         Gibt es hier einen Fensterbaum neben UIA?
+    ui_tree_nodes(...)          Fensterbaum als (tiefe, rolle, name)
 
 Fokus und Leerlaufzeit sind ausdruecklich optional. Unter Windows gibt es
 fuer beides genau eine Antwort; unter Linux haengen sie von der
@@ -331,19 +334,68 @@ def idle_backend_name():
     return linuxdesktop.leerlauf_name()
 
 
-def accessibility_enable():
+def accessibility_enable(bildschirmleser=True):
     """Barrierefreiheitsbruecke einschalten (nur Linux).
 
-    Electron veroeffentlicht seinen Baum nur, solange org.a11y.Status.
-    IsEnabled true ist. Ohne diesen Schalter bleibt das Claude-Fenster
-    unsichtbar -- fuer Bildschirmleser wie fuer uns.
+    Zwei Schalter, nicht einer, und der Unterschied hat Stunden gekostet:
+    org.a11y.Status.IsEnabled bewegt Electron nur dazu, das Fenstergeruest
+    zu veroeffentlichen -- vier Knoten, kein Inhalt. Den Seitenbaum baut
+    Chromium erst auf, wenn sich ein Bildschirmleser anmeldet, weil das
+    Rechenzeit kostet und sonst niemand danach fragt. Diese Anmeldung ist
+    ScreenReaderEnabled.
+
+    Beide werden beim Start des Daemons gesetzt und bleiben fuer die
+    Sitzung stehen. Fuer eine bereits laufende Claude-Instanz kommt der
+    Schalter zu spaet -- Chromium liest ihn beim Start des Renderers.
+    Deshalb wird hier so frueh wie moeglich geschaltet: der naechste Start
+    von Claude bringt den Baum dann von sich aus mit.
     """
-    if IS_LINUX and linuxdesktop is not None:
-        try:
-            return linuxdesktop.barrierefreiheit_einschalten()
-        except Exception as exc:
-            logging.info("Barrierefreiheit nicht einschaltbar: %s", exc)
-    return False
+    if not (IS_LINUX and linuxdesktop is not None):
+        return False
+    bruecke = False
+    try:
+        bruecke = bool(linuxdesktop.barrierefreiheit_einschalten())
+    except Exception as exc:
+        logging.info("Barrierefreiheit nicht einschaltbar: %s", exc)
+    if not bildschirmleser:
+        logging.info("Barrierefreiheitsbruecke: %s, Bildschirmleser bleibt "
+                     "auf Wunsch aus", "an" if bruecke else "nicht erreichbar")
+        return bruecke
+    leser = False
+    try:
+        leser = bool(linuxdesktop.bildschirmleser_melden(True))
+    except Exception as exc:
+        logging.info("Bildschirmleser nicht anmeldbar: %s", exc)
+    logging.info("Barrierefreiheit: Bruecke %s, Bildschirmleser %s",
+                 "an" if bruecke else "nicht erreichbar",
+                 "angemeldet" if leser else "nicht anmeldbar")
+    return bruecke
+
+
+def ui_tree_supported():
+    """Laesst sich der Fensterbaum ueber die Plattformschicht auslesen?
+
+    Gemeint ist ausdruecklich der Weg neben UI Automation: unter Windows
+    liest claude_rpc direkt ueber uiautomation, hier steht deshalb False.
+    """
+    return bool(not IS_WINDOWS and IS_LINUX and linuxdesktop is not None)
+
+
+def ui_tree_nodes(suchbegriff="claude", max_nodes=3000, budget_seconds=4.0):
+    """Fensterbaum als flache Liste (tiefe, rolle, name), sonst None.
+
+    None heisst "diese Plattform kann es nicht", eine leere Liste heisst
+    "Claude ist gerade nicht im Baum". Der Aufrufer muss beides
+    unterscheiden koennen, sonst schaltet er den Watcher beim ersten
+    geschlossenen Fenster dauerhaft ab.
+    """
+    if not ui_tree_supported():
+        return None
+    try:
+        return linuxdesktop.atspi_knoten(suchbegriff, max_nodes, budget_seconds)
+    except Exception as exc:
+        logging.info("AT-SPI-Baum nicht lesbar: %s", exc)
+        return []
 
 
 def init_com():

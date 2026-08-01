@@ -24,7 +24,8 @@ from hostplatform import (
     DEFAULT_PROCESS_NAMES, accessibility_enable, claude_candidates,
     claude_config_dir, claude_focused, claude_running, idle_backend_name,
     idle_configure, idle_seconds, idle_supported, init_com, iter_processes,
-    process_cmdline, process_path, single_instance,
+    process_cmdline, process_path, single_instance, ui_tree_nodes,
+    ui_tree_supported,
 )
 
 try:
@@ -290,9 +291,19 @@ class UIModelWatcher:
         self.text = None
         self.next_refresh = 0.0
         self._ax_ready = False
+        self._hinweis = False
 
     def get(self):
-        if not (self.cfg.get("enabled") and _uia):
+        if not self.cfg.get("enabled"):
+            return None
+        if _uia is None:
+            # Ohne UI Automation gibt es hier nichts zu tun. Ein eigener
+            # AT-SPI-Lauf waere reine Verschwendung: der UIWatcher nimmt
+            # das Modell in seinem Durchlauf ohnehin mit.
+            if not self._hinweis:
+                self._hinweis = True
+                logging.info("ui_model bleibt aus - ausserhalb von Windows "
+                             "liefert der UI-Watcher das Modell mit")
             return None
         now = time.time()
         if now >= self.next_refresh:
@@ -358,9 +369,59 @@ def _pretty_model(model_id):
     return "%s %s" % (match.group(1).capitalize(), version)
 
 
+# AT-SPI benennt dieselben Bedienelemente anders als UI Automation. Die
+# Auswertung im UIWatcher kennt nur die Windows-Namen -- uebersetzt wird
+# deshalb genau hier, an einer Stelle. Zwei getrennte Auswertungen waeren
+# zwei Orte, an denen die Erkennung mit der naechsten Claude-Fassung
+# auseinanderlaufen kann.
+#
+# Was nicht in der Tabelle steht, behaelt seinen AT-SPI-Namen und faellt
+# damit durch jede Abfrage. Es bleibt trotzdem in der Liste stehen: die
+# Statuszeile wird ueber den Abstand zum Eingabefeld gesucht, und ein
+# uebergangener Knoten wuerde diesen Abstand verfaelschen.
+ATSPI_ROLLEN = {
+    "push button": "ButtonControl",
+    "toggle button": "ButtonControl",
+    "button": "ButtonControl",
+    "menu item": "ButtonControl",
+    "combo box": "ButtonControl",
+    "entry": "EditControl",
+    "text box": "EditControl",
+    "password text": "EditControl",
+    "text": "TextControl",
+    "static": "TextControl",
+    "label": "TextControl",
+    "paragraph": "TextControl",
+    "heading": "TextControl",
+    "caption": "TextControl",
+    "status bar": "TextControl",
+    "progress bar": "ProgressBarControl",
+    "level bar": "ProgressBarControl",
+    "document web": "DocumentControl",
+    "document frame": "DocumentControl",
+    "frame": "WindowControl",
+    "window": "WindowControl",
+    "dialog": "WindowControl",
+}
+
+# Rollen der obersten Ebene. Deren Name ist der Fenstertitel und damit der
+# Chattitel -- unter Windows laesst der Durchlauf das oberste Fenster
+# deshalb aus (includeTop=False), und hier gilt dasselbe. Was gar nicht
+# erst eingesammelt wird, kann auch nicht versehentlich in der Presence
+# landen.
+ATSPI_FENSTER_ROLLEN = ("frame", "window", "dialog", "application")
+
+# Der Beleg dafuer, dass Chromium den Seiteninhalt veroeffentlicht und
+# nicht nur das Fenstergeruest. Ohne einen solchen Knoten ist jeder
+# Durchlauf vergeblich, und das gehoert ins Protokoll statt in die Stille.
+ATSPI_INHALT_ROLLEN = ("document web", "document frame", "document")
+
+
 class UIWatcher:
     """Modul: ein einziger Durchlauf durch den Accessibility-Tree des
-    Claude-Fensters (Windows UI Automation).
+    Claude-Fensters -- unter Windows ueber UI Automation, unter Linux ueber
+    AT-SPI. Beide Wege erzeugen dieselbe Liste (Steuerelementtyp, Name);
+    alles danach ist gemeinsam.
 
     Liefert Modell, Live-Status ("Desktop Commander wird verwendet...") und
     das Busy-Flag (Stop-Button sichtbar). Als einzige Quelle funktioniert das
@@ -401,15 +462,39 @@ class UIWatcher:
         )
         self.lookback = self.cfg.get("status_lookback", 12)
         self.require_busy = self.cfg.get("require_busy", True)
+        self._fremde_rollen = False
+        self._skelett_gemeldet = False
+
+    def quelle(self):
+        """Welcher Weg liest hier das Fenster: "uia", "atspi" oder None."""
+        if _uia is not None:
+            return "uia"
+        if ui_tree_supported():
+            return "atspi"
+        return None
+
+    def quelle_text(self):
+        """Dasselbe in Worten, fuer das Protokoll."""
+        return {
+            "uia": "Windows UI Automation",
+            "atspi": "AT-SPI ueber D-Bus",
+        }.get(self.quelle(),
+              "keine Schnittstelle - Fenster wird nicht ausgelesen")
 
     def refresh(self):
-        if not (self.cfg.get("enabled", True) and _uia):
+        if not (self.cfg.get("enabled", True) and self.quelle()):
             self.data = {}
             return self.data
         now = time.time()
         if now >= self.next_refresh:
-            self.next_refresh = now + self.cfg.get("refresh_seconds", 8)
             self.data = self._scan()
+            # Ein AT-SPI-Durchlauf kostet drei D-Bus-Runden je Knoten und
+            # kann bei einem grossen Baum Sekunden dauern. Damit der Daemon
+            # nicht den ueberwiegenden Teil seiner Zeit im Baum verbringt,
+            # waechst die Pause mit der gemessenen Dauer mit.
+            dauer = time.time() - now
+            self.next_refresh = time.time() + max(
+                self.cfg.get("refresh_seconds", 8), dauer * 3)
         return self.data
 
     def info(self):
@@ -444,75 +529,166 @@ class UIWatcher:
         return bool(self.data.get("busy"))
 
     def _scan(self):
-        out = {}
+        """Einmal durch den Baum, je nach System ueber den einen oder den
+        anderen Weg -- ausgewertet wird beides gemeinsam."""
         try:
-            _uia.SetGlobalSearchTimeout(2)
-            win = UIModelWatcher._find_window()
-            if win is None:
-                self._ax_ready = False
+            if self.quelle() == "atspi":
+                nodes = self._knoten_atspi()
+            else:
+                nodes = self._knoten_uia()
+            if not nodes:
                 return {}
-            if not self._ax_ready:
-                doc = _uia.DocumentControl(searchFromControl=win)
-                if not doc.Exists(3, 1):
-                    return {}
-                self._ax_ready = True
-            max_nodes = self.cfg.get("max_nodes", 3000)
-            nodes = []
-            count = 0
-            for ctrl, _depth in _uia.WalkControl(win, includeTop=False, maxDepth=40):
-                count += 1
-                if count > max_nodes:
-                    break
-                try:
-                    name = (ctrl.Name or "").strip()
-                    if not name:
-                        continue
-                    nodes.append((ctrl.ControlTypeName, name))
-                except Exception:
-                    continue
-
-            models = []
-            composer_at = -1
-            for index, (kind, name) in enumerate(nodes):
-                if kind == "ButtonControl":
-                    if name.lower() in self.stop_names:
-                        out["busy"] = True
-                    elif re.match(r"Modell?:", name):
-                        found = re.search(
-                            r"(Fable|Opus|Sonnet|Haiku)(\s+\d+(?:\.\d+)?)?",
-                            name, re.I,
-                        )
-                        if found:
-                            models.append(found.group(0).strip())
-                elif kind == "EditControl" and self.composer_re.search(name):
-                    composer_at = index
-            if models:
-                out["model"] = models[-1]
-            out.update(self._read_limits(nodes))
-
-            # Die Statuszeile steht unmittelbar ueber dem Eingabefeld. Ohne
-            # diesen Anker wuerde auch Text aus dem Chatverlauf passen -- ein
-            # Chat, in dem "... wird verwendet" vorkommt, hat die Presence
-            # sonst dauerhaft falsch beschriftet.
-            if composer_at > 0 and (out.get("busy") or not self.require_busy):
-                start = max(0, composer_at - self.lookback)
-                candidates = [
-                    name
-                    for kind, name in nodes[start:composer_at]
-                    if kind == "TextControl"
-                    and len(name) <= 80
-                    and name.endswith("…")
-                ]
-                if candidates:
-                    known = [c for c in candidates if self.status_re.search(c)]
-                    # Bekannte Formulierung bevorzugen, sonst die letzte
-                    # Zeile ueber dem Eingabefeld -- so ueberleben auch
-                    # Statustexte, die es heute noch nicht gibt.
-                    out["status"] = (known or candidates)[-1].rstrip("… .")
-            return out
+            return self._auswerten(nodes)
         except Exception as exc:
             logging.warning("UI-Watcher fehlgeschlagen: %s", exc)
             return {}
+
+    def _knoten_uia(self):
+        """Windows: der Fensterbaum ueber UI Automation."""
+        _uia.SetGlobalSearchTimeout(2)
+        win = UIModelWatcher._find_window()
+        if win is None:
+            self._ax_ready = False
+            return []
+        if not self._ax_ready:
+            # Erst diese Anforderung bringt Electron dazu, den Baum
+            # ueberhaupt aufzubauen.
+            doc = _uia.DocumentControl(searchFromControl=win)
+            if not doc.Exists(3, 1):
+                return []
+            self._ax_ready = True
+        max_nodes = self.cfg.get("max_nodes", 3000)
+        nodes = []
+        count = 0
+        for ctrl, _depth in _uia.WalkControl(win, includeTop=False, maxDepth=40):
+            count += 1
+            if count > max_nodes:
+                break
+            try:
+                name = (ctrl.Name or "").strip()
+                if not name:
+                    continue
+                nodes.append((ctrl.ControlTypeName, name))
+            except Exception:
+                continue
+        return nodes
+
+    def _knoten_atspi(self):
+        """Linux: derselbe Baum ueber AT-SPI, auf Windows-Namen uebersetzt.
+
+        Namenlose Knoten fallen wie unter Windows heraus. Das ist keine
+        Kosmetik: der Abstand zum Eingabefeld (status_lookback) zaehlt
+        Eintraege dieser Liste, und AT-SPI-Baeume bestehen zum grossen Teil
+        aus namenlosen Huellknoten, die den Abstand sonst sprengen wuerden.
+        """
+        roh = ui_tree_nodes(
+            self.cfg.get("atspi_match", "claude"),
+            self.cfg.get("max_nodes", 3000),
+            self.cfg.get("scan_budget_seconds", 4.0),
+        )
+        if not roh:
+            self._ax_ready = False
+            return []
+        self._inhalt_pruefen(roh)
+        nodes = []
+        unbekannt = set()
+        for tiefe, rolle, name in roh:
+            rolle = (rolle or "").lower()
+            if tiefe == 0 and rolle in ATSPI_FENSTER_ROLLEN:
+                continue
+            name = (name or "").strip()
+            if not name:
+                continue
+            art = ATSPI_ROLLEN.get(rolle)
+            if art is None:
+                unbekannt.add(rolle)
+                art = rolle
+            nodes.append((art, name))
+        if unbekannt and self._ax_ready and not self._fremde_rollen:
+            # Nur die Rollennamen, nie die Beschriftungen: die Tabelle oben
+            # laesst sich damit nachziehen, ohne dass Chatinhalt ins
+            # Protokoll geraet.
+            self._fremde_rollen = True
+            logging.info("AT-SPI-Rollen ohne Entsprechung: %s",
+                         ", ".join(sorted(unbekannt))[:400])
+        return nodes
+
+    def _inhalt_pruefen(self, roh):
+        """Steht im Baum Seiteninhalt oder nur das Fenstergeruest?
+
+        Chromium veroeffentlicht ohne angemeldeten Bildschirmleser nur den
+        Fensterrahmen -- vier Knoten, kein Dokument. Wer das nicht
+        protokolliert, sucht den Fehler spaeter in der Auswertung, obwohl
+        gar nichts anzukommen ist. Der Schalter wirkt zudem erst beim
+        naechsten Start von Claude, was ohne Hinweis niemand erraet.
+        """
+        inhalt = any((rolle or "").lower() in ATSPI_INHALT_ROLLEN
+                     for _tiefe, rolle, _name in roh)
+        if inhalt and not self._ax_ready:
+            self._ax_ready = True
+            logging.info("AT-SPI: Claude veroeffentlicht den Seiteninhalt "
+                         "(%d Knoten)", len(roh))
+        elif not inhalt:
+            self._ax_ready = False
+            if not self._skelett_gemeldet:
+                self._skelett_gemeldet = True
+                logging.info(
+                    "AT-SPI: nur das Fenstergeruest (%d Knoten), kein "
+                    "Dokumentknoten. Der Bildschirmleser-Schalter wirkt erst "
+                    "beim naechsten Start von Claude; hilft auch der nicht, "
+                    "Claude mit --force-renderer-accessibility starten.",
+                    len(roh))
+
+    def _auswerten(self, nodes):
+        """Aus (Steuerelementtyp, Name) die drei Angaben ziehen. Gemeinsam
+        fuer beide Systeme -- hier steht das ganze Wissen ueber die
+        Oberflaeche von Claude."""
+        out = {}
+        models = []
+        composer_at = -1
+        for index, (kind, name) in enumerate(nodes):
+            if kind == "ButtonControl":
+                if name.lower() in self.stop_names:
+                    out["busy"] = True
+                elif re.match(r"Modell?:", name):
+                    found = re.search(
+                        r"(Fable|Opus|Sonnet|Haiku)(\s+\d+(?:\.\d+)?)?",
+                        name, re.I,
+                    )
+                    if found:
+                        models.append(found.group(0).strip())
+            elif kind == "EditControl" and self.composer_re.search(name):
+                composer_at = index
+        if models:
+            out["model"] = models[-1]
+        out.update(self._read_limits(nodes))
+
+        # Die Statuszeile steht unmittelbar ueber dem Eingabefeld. Ohne
+        # diesen Anker wuerde auch Text aus dem Chatverlauf passen -- ein
+        # Chat, in dem "... wird verwendet" vorkommt, hat die Presence
+        # sonst dauerhaft falsch beschriftet.
+        if composer_at > 0 and (out.get("busy") or not self.require_busy):
+            start = max(0, composer_at - self.lookback)
+            candidates = [
+                name
+                for kind, name in nodes[start:composer_at]
+                if kind == "TextControl"
+                and len(name) <= 80
+                and name.endswith(self.STATUS_ENDE)
+            ]
+            if candidates:
+                known = [c for c in candidates if self.status_re.search(c)]
+                # Bekannte Formulierung bevorzugen, sonst die letzte
+                # Zeile ueber dem Eingabefeld -- so ueberleben auch
+                # Statustexte, die es heute noch nicht gibt.
+                out["status"] = (known or candidates)[-1].rstrip("… .")
+        return out
+
+    # Laufende Statustexte enden mit Auslassungspunkten. Welches Zeichen
+    # ankommt, entscheidet die Oberflaeche: UI Automation liefert das
+    # gesetzte "…", AT-SPI gibt den Text so heraus, wie er im Dokument
+    # steht -- dort stehen je nach Stelle drei einzelne Punkte.
+    STATUS_ENDE = ("…", "...")
 
     # Im Nutzungsfenster traegt jede Fortschrittsleiste den Namen ihres
     # Limits, der Prozentwert steht im naechsten Textknoten:
@@ -985,11 +1161,14 @@ def main():
     # Compositor keine Leerlaufzeit, sondern meldet nur das Ueberschreiten
     # genau dieser Grenze.
     idle_configure(active_threshold)
-    if (cfg.get("ui_watcher") or {}).get("enabled", True):
-        # Ohne diesen Schalter veroeffentlicht Electron unter Linux keinen
-        # Baum, und der UIWatcher sieht ein leeres Fenster. Unter Windows
-        # ist der Aufruf wirkungslos.
-        accessibility_enable()
+    ui_cfg = cfg.get("ui_watcher") or {}
+    if ui_cfg.get("enabled", True):
+        # Ohne diese Schalter veroeffentlicht Electron unter Linux keinen
+        # Baum, und der UIWatcher sieht ein leeres Fenster. So frueh wie
+        # moeglich, weil Chromium sie beim Start des Renderers liest: fuer
+        # das gerade laufende Claude kommt der Schalter zu spaet, fuer den
+        # naechsten Start nicht. Unter Windows ist der Aufruf wirkungslos.
+        accessibility_enable(ui_cfg.get("announce_screen_reader", True))
     logging.info("Leerlaufmessung: %s", idle_backend_name())
 
     local_usage = LocalUsageWatcher(cfg.get("local_usage"))
@@ -1000,10 +1179,14 @@ def main():
     tool_history = ToolHistoryWatcher(cfg.get("tool_history"))
     local_session = LocalSessionWatcher(cfg.get("local_session"))
     ui = UIWatcher(cfg.get("ui_watcher"))
+    # Welcher Weg das Fenster liest, entscheidet sich zur Laufzeit. Steht
+    # das nicht im Protokoll, sucht man den Grund fuer eine leere erste
+    # Zeile spaeter im falschen Modul.
+    logging.info("UI-Watcher: %s (%s)",
+                 "aus" if not ui_cfg.get("enabled", True) else "an",
+                 ui.quelle_text())
     tool_in_use = re.compile(
-        (cfg.get("ui_watcher") or {}).get(
-            "tool_status_pattern", r"(wird verwendet|is using)"
-        ),
+        ui_cfg.get("tool_status_pattern", r"(wird verwendet|is using)"),
         re.I,
     )
     presence = RichPresence(client_id)
