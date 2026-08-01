@@ -43,15 +43,21 @@
     "refresh_seconds": 8,
     "max_nodes": 3000,
     "template": "using cowork with {model}",
+    "code_template": "using code with {model}",
     "busy_text": "Claude arbeitet gerade...",
     "require_busy": true,
     "collapse_duplicate_prefix": true,
     "status_lookback": 12,
+    "status_lookahead": 8,
     "tool_status_pattern": "(wird verwendet|is using)",
     "composer_pattern": "(Anfrage an Claude|Nachricht|Message Claude|Reply to Claude)",
+    "composer_anchor_names": ["prompt", "type / for commands"],
+    "bare_model_pattern": "^(Fable|Opus|Sonnet|Haiku)( [0-9][0-9.]*)?$",
+    "stop_button_names": ["antwort stoppen", "stop response", "antwort anhalten", "stop"],
     "announce_screen_reader": true,
     "scan_budget_seconds": 4.0,
-    "atspi_match": "claude"
+    "atspi_match": "claude",
+    "_hinweis_sitzungsansicht": "Die Sitzungsansicht von Claude Code benennt dieselben Dinge anders als der Cloud-Chat: das Eingabefeld ist ein Behaelter namens 'Prompt' (composer_anchor_names statt composer_pattern), der Modellknopf traegt nur den Modellnamen (bare_model_pattern) und heisst waehrend der Antwort schlicht 'Stop'. stop_button_names und composer_anchor_names werden immer gegen den ganzen Namen geprueft, nie gegen ein Teilstueck - sonst gilt schon die Hintergrundaufgabe 'Stop this task' als laufende Antwort. status_lookahead deckt ab, dass die Statusleiste dort unter dem Eingabefeld haengt statt darueber; weitere Sprachen gehoeren in dieselben Listen."
   },
   "tool_history": {
     "enabled": true,

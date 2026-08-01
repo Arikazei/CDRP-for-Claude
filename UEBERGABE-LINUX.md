@@ -59,6 +59,44 @@ Zwei Befunde, die du kennen musst, weil sie viel Zeit gekostet haben:
    Sperren ignoriert und nur echte Eingaben zählt. Das ist eingebaut und
    nachgewiesen: `nur Eingaben: 8,2 s` gegen `mit Sperren: keine Meldung`.
 
+### Nachtrag: die Sitzungsansicht von Claude Code
+
+Seit Claude Desktop den Seiteninhalt tatsächlich veröffentlicht (~560 Knoten),
+ist gemessen, dass die **Sitzungsansicht von Claude Code dieselben Dinge anders
+benennt** als der Cloud-Chat, für den die Muster ursprünglich geschrieben
+wurden. Gemessen am laufenden Fenster:
+
+| Sache | Cloud-Chat | Sitzungsansicht |
+|---|---|---|
+| Eingabefeld | `EditControl "Anfrage an Claude"` | `section "Prompt"` (contenteditable), Platzhalter `static "Type / for commands"` |
+| Modell | `ButtonControl "Modell: Fable 5"` | `ButtonControl "Fable 5"` — nur der Name |
+| Antwort läuft | `ButtonControl "Antwort stoppen"` | derselbe Knopf wie „Send", umbenannt in `"Stop"` |
+| Statusleiste | Textknoten **über** dem Eingabefeld | `statusbar` **unter** dem Eingabefeld |
+
+Zwei Befunde dazu, die Zeit sparen:
+
+1. **Der Vergleich auf „Stop" muss den ganzen Namen prüfen.** Im selben Fenster
+   sitzt die Leiste der Hintergrundaufgaben mit `ButtonControl "Stop this
+   task"`. Ein Teilstück-Vergleich hätte die Presence auf „arbeitet gerade"
+   gestellt, sobald irgendeine Hintergrundaufgabe läuft — also fast immer.
+2. **Die `statusbar`-Knoten tragen ihren Text nicht selbst.** Sie haben leere
+   Namen, aber ihr Text steht als `static`-Kind darunter und ist deshalb im
+   flachen Durchlauf ohnehin schon enthalten. Über `org.a11y.atspi.Text
+   GetText` kommt nur genau dieselbe Zeichenkette zurück (nachgemessen:
+   `statusbar` → `GetText "Chat mode"`, Kind → `static "Chat mode"`). Ein
+   GetText-Rückfall wäre also reine Zusatzlast ohne Zusatzwissen und ist
+   bewusst **nicht** eingebaut.
+
+Die leeren `statusbar`-Knoten am Eingabefeld melden im Ruhezustand
+`CharacterCount 0`. Ob dort während einer laufenden Antwort ein Statustext
+erscheint, ließ sich in der Sitzung, in der das entstand, nicht beobachten: der
+Hauptfaden war die ganze Zeit im Wartezustand, während die Arbeit in einer
+Hintergrundaufgabe lief. Deshalb schreibt der UIWatcher beim ersten erkannten
+„Antwort läuft" einmalig ins Protokoll, ob er Anker und Statuszeile gefunden
+hat. Fehlt die Statuszeile dauerhaft, ist das kein Fehler: `status()` gibt dann
+den `busy_text` zurück, Zeile 1 zeigt also weiterhin „Claude arbeitet
+gerade...".
+
 ---
 
 ## 3. Aufbau des Projekts
