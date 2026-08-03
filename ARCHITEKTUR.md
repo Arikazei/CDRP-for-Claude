@@ -95,10 +95,36 @@ Der Chat-Titel steht im Fenstertitel ebenfalls zur Verfügung und wird bewusst
 erhoben wird, kann niemand versehentlich veröffentlichen.
 
 Der Status wird **am Eingabefeld verankert** gesucht: nur TextControls in den
-letzten `status_lookback` (12) Knoten davor, nur wenn Busy gesetzt ist. Ohne
-diesen Anker passt auch Text aus dem Chatverlauf — ein Chat, in dem
-„… wird verwendet" vorkommt, beschriftet die Presence sonst dauerhaft falsch.
-Das ist real passiert.
+letzten `status_lookback` (12) Knoten davor und den `status_lookahead` (8)
+Knoten dahinter, nur wenn Busy gesetzt ist. Ohne diesen Anker passt auch Text
+aus dem Chatverlauf — ein Chat, in dem „… wird verwendet" vorkommt,
+beschriftet die Presence sonst dauerhaft falsch. Das ist real passiert. Der
+Blick nach hinten reicht nur bis in die Knopfreihe des Eingabebereichs; der
+Chatverlauf liegt davor und bleibt so oder so unerreichbar.
+
+**Zwei Ansichten, zwei Benennungen.** Der Cloud-Chat und die Sitzungsansicht
+von Claude Code beschriften dieselben Dinge verschieden. Geprüft wird immer
+erst das Cloud-Muster, dann das der Sitzungsansicht:
+
+| Sache | Cloud-Chat | Sitzungsansicht |
+|---|---|---|
+| Anker | `EditControl`, `composer_pattern` | Name gleich `composer_anchor_names` („Prompt") |
+| Modell | `ButtonControl "Modell: <Name>"` | `ButtonControl "<Name>"`, `bare_model_pattern` |
+| Busy | `"Antwort stoppen"` | `"Stop"` |
+| Statusleiste | über dem Eingabefeld | darunter |
+
+`stop_button_names` und `composer_anchor_names` werden gegen den **ganzen**
+Namen verglichen, nie gegen ein Teilstück: im selben Fenster sitzt die Leiste
+der Hintergrundaufgaben mit „Stop this task", und ein Teilstück-Vergleich
+hätte die Presence bei jeder laufenden Hintergrundaufgabe auf „arbeitet
+gerade" gestellt.
+
+Vom Behälter „Prompt" wird ausschließlich der **Name** gelesen, nie sein
+Inhalt — der ist die Eingabe des Nutzers.
+
+Stammt das Modell vom blossen Knopf, ist die Ansicht sicher die von Claude
+Code; die zweite Zeile beschriftet das dann über `code_template` als
+„using code with …" statt „using cowork with …".
 
 Beim ersten Zugriff wird einmalig ein `DocumentControl` angefordert; erst
 dadurch baut Electron den Accessibility-Tree überhaupt auf.
@@ -237,8 +263,9 @@ zwei mypyc-kompilierte `.pyd` einschleppt — deshalb läuft HTTP jetzt über
 - **Der Usage-Endpunkt drosselt.** 5-Minuten-Intervall nicht verkürzen.
 - **Ändert Claude die Fensterbeschriftung**, bricht die Modellerkennung. Regex
   `Modell?:` in `UIWatcher._scan` anpassen. Statuszeile und Busy-Flag hängen
-  zusätzlich an `composer_pattern` und `stop_button_names` — beide in der
-  Konfiguration änderbar, ohne den Code anzufassen.
+  zusätzlich an `composer_pattern`, `composer_anchor_names`,
+  `bare_model_pattern` und `stop_button_names` — alle in der Konfiguration
+  änderbar, ohne den Code anzufassen. Dort gehören auch weitere Sprachen hin.
 - **Cloud-Chats ohne offenes Fenster** liefern nichts; dafür existiert der
   Fallback-Text.
 - **Zwei Prozesse sind normal.** Das venv-`pythonw.exe` ist nur eine Weiche auf
