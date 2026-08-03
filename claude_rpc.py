@@ -1167,11 +1167,28 @@ class RichPresence:
         self.last_payload = None
 
     def _connect(self):
-        if self.rpc is None:
-            rpc = Presence(self.client_id)
-            rpc.connect()
+        if self.rpc is not None:
+            return
+        # Die Rohrnummern werden einzeln durchprobiert statt pypresence
+        # suchen zu lassen: dessen Suche stolpert ueber verwaiste
+        # Socket-Dateien eines frueheren Discord-Laufs -- 'Connection
+        # refused' bricht dort die ganze Suche ab, obwohl das naechste
+        # Rohr antworten wuerde. Nach einem Rechnerneustart lag genau so
+        # eine Leiche in XDG_RUNTIME_DIR, und die Presence blieb stumm.
+        letzter = None
+        for rohr in range(10):
+            rpc = Presence(self.client_id, pipe=rohr)
+            try:
+                rpc.connect()
+            except Exception as exc:
+                # DiscordNotFound bei fehlendem Rohr, ConnectionRefused
+                # bei einer Leiche -- beides heisst nur: naechstes Rohr.
+                letzter = exc
+                continue
             self.rpc = rpc
-            logging.info("Mit Discord verbunden")
+            logging.info("Mit Discord verbunden (Rohr %d)", rohr)
+            return
+        raise letzter or ConnectionError("kein Discord-IPC-Rohr gefunden")
 
     def update(self, payload):
         try:
