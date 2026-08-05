@@ -2,26 +2,35 @@
   "manifest_version": "0.2",
   "name": "claude-discord-presence",
   "display_name": "Discord Presence for Claude Desktop",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Zeigt in Discord an, woran du gerade mit Claude Desktop arbeitest.",
   "long_description": "Inoffizielle Rich Presence fuer Claude Desktop, fuer Windows und Linux. Liest ausschliesslich lokal: das Claude-Fenster ueber die Barrierefreiheitsschnittstelle des Systems (Windows UI Automation, Linux AT-SPI) fuer Modell und Statuszeile, den Werkzeugverlauf von Desktop Commander sowie die Sitzungs- und Nutzungsdateien der App. Weder Chatinhalte noch Chat-Titel werden erhoben; an Discord gehen nur Modellname, Statuszeile, Auslastung in Prozent und die Abo-Bezeichnung.",
   "author": {
     "name": "Arikazei"
   },
   "icon": "icon.png",
-  "keywords": ["discord", "rich presence", "status", "windows", "linux"],
+  "keywords": [
+    "discord",
+    "rich presence",
+    "status",
+    "windows",
+    "linux"
+  ],
   "license": "MIT",
   "server": {
     "type": "python",
     "entry_point": "server/main.py",
     "mcp_config": {
-      "_kommentar": "Grundfall ist Linux mit dem System-Python; Windows bringt eine eigene Runtime mit, weil dort kein Python vorausgesetzt werden kann.",
       "command": "python3",
-      "args": ["${__dirname}/server/main.py"],
+      "args": [
+        "${__dirname}/server/main.py"
+      ],
       "platform_overrides": {
         "win32": {
           "command": "${__dirname}/runtime/ClaudeDiscordPresence.exe",
-          "args": ["${__dirname}/server/main.py"]
+          "args": [
+            "${__dirname}/server/main.py"
+          ]
         }
       },
       "env": {
@@ -89,7 +98,10 @@
     }
   },
   "compatibility": {
-    "platforms": ["win32", "linux"],
+    "platforms": [
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "python": ">=3.9"
     }
