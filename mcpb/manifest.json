@@ -61,7 +61,7 @@
     "client_id": {
       "type": "string",
       "title": "Discord Application ID",
-      "description": "Optional. Leer lassen, um die mitgelieferte Anwendung zu verwenden - dann erscheinen deren Name und Bild bei dir in Discord. Fuer einen eigenen Namen und ein eigenes Bild im Developer Portal eine Anwendung anlegen, unter Rich Presence > Art Assets ein Bild mit dem Namen 'claude' hochladen und die Application ID hier eintragen.",
+      "description": "Optional. Leer lassen, um die mitgelieferte Anwendung zu verwenden - dann erscheinen deren Name und Bild bei dir in Discord. Fuer einen eigenen Namen und ein eigenes Bild im Developer Portal eine Anwendung anlegen, unter Rich Presence > Art Assets ein Bild mit dem Namen 'logo' hochladen und die Application ID hier eintragen.",
       "required": false
     },
     "idle_timeout_minutes": {

@@ -275,3 +275,59 @@ zwei mypyc-kompilierte `.pyd` einschleppt — deshalb läuft HTTP jetzt über
   nicht, erscheint die Presence stillschweigend ohne Bild. Discord leitet den
   Namen beim Hochladen aus dem Dateinamen ab (klein geschrieben, ohne Endung)
   und lässt ihn danach umbenennen.
+
+## Linux im Einzelnen
+
+Aus dem README hierher verschoben: fuer die Benutzung braucht man das nicht,
+fuer die Fehlersuche schon.
+
+### Leerlaufmessung, sechs Wege
+
+Keiner dieser Wege ist ueberall vorhanden. `linuxdesktop.py` probiert sie der
+Reihe nach durch und behaelt den ersten, der antwortet.
+
+| Weg | wo er traegt |
+|---|---|
+| Wayland `ext-idle-notify-v1` | Plasma 6, GNOME 45+, Sway, Hyprland |
+| GNOME Mutter `IdleMonitor` | GNOME unter X11 und Wayland |
+| `org.freedesktop.ScreenSaver` | KDE unter X11, XFCE, MATE |
+| X11 MIT-SCREEN-SAVER | jede reine X11-Sitzung |
+| systemd-logind `IdleSinceHint` | wo die Sitzungsverwaltung ihn pflegt |
+| Sperrbildschirm an/aus | grober Notnagel, nur zwei Zustaende |
+
+Unter Plasma 6 traegt nur `ext-idle-notify-v1` in **Fassung 2**
+(`get_input_idle_notification`). Fassung 1 meldet nie Leerlauf, sobald
+irgendeine Anwendung eine Leerlaufsperre haelt -- VR-Laufzeiten und Browser
+mit Ton tun das dauerhaft.
+
+Das Wayland-Protokoll liefert **keine Zeit**, sondern meldet nur das Ueber-
+und Unterschreiten einer angemeldeten Schwelle. `idle_configure()` muss
+deshalb vor der ersten Messung kommen.
+
+### Fokus ueber AT-SPI
+
+Der Fokus laeuft ueber die Barrierefreiheitsschnittstelle, weil das der
+einzige desktopuebergreifende Weg ist: KDE und GNOME geben das aktive Fenster
+unter Wayland aus Sicherheitsgruenden nicht heraus, AT-SPI dagegen ist ein
+freedesktop-Standard ueber D-Bus und damit unabhaengig vom Fenstersystem.
+
+Kennt der Desktop den Zustand "aktiv" zwar, pflegt ihn aber nicht -- unter
+Plasma 6 beobachtet --, meldet ihn kein einziges Fenster auf dem Bus. Dieser
+Fall wird als unbrauchbares Signal gewertet, nicht als "Claude ist nie im
+Vordergrund".
+
+Eine **D-Bus-Fehlerantwort ist eine gueltige Nachricht**, keine Ausnahme. Wer
+nur `try/except` schreibt, reicht den Fehlertext als Nutzdaten weiter; der
+`message_type` muss geprueft werden.
+
+### Fensterbaum und Bildschirmleser
+
+Chromium veroeffentlicht Seiteninhalt nur, wenn ein Bildschirmleser angemeldet
+ist (`org.a11y.Status.ScreenReaderEnabled`). `IsEnabled` genuegt ihm nicht,
+weil ein vollstaendiger Baum Rechenzeit kostet. Ohne Anmeldung sieht der
+UIWatcher genau vier Knoten -- das Fenstergeruest ohne Inhalt.
+
+Der Daemon meldet beim Start selbst einen an
+(`ui_watcher.announce_screen_reader`, Vorgabe an). Der Schalter wirkt erst
+beim naechsten Start von Claude, weil Chromium ihn beim Hochfahren des
+Renderers liest.
