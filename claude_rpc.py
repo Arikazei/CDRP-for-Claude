@@ -479,11 +479,18 @@ class UIWatcher:
             ),
             re.I,
         )
+        # "stop" steht allein in der Sitzungsansicht von Claude Code, wo der
+        # Senden-Knopf waehrend der Antwort seine Beschriftung wechselt.
+        # Verglichen wird der ganze Name, nie ein Teilstueck: im selben
+        # Fenster sitzt "Stop this task" der Hintergrundaufgaben, und ein
+        # Teilstueck-Vergleich haette die Presence bei jeder laufenden
+        # Hintergrundaufgabe auf "arbeitet gerade" gestellt.
         self.stop_names = {
             n.lower()
             for n in self.cfg.get(
                 "stop_button_names",
-                ["antwort stoppen", "stop response", "antwort anhalten"],
+                ["antwort stoppen", "stop response", "antwort anhalten",
+                 "stop"],
             )
         }
         self.composer_re = re.compile(
@@ -493,10 +500,39 @@ class UIWatcher:
             ),
             re.I,
         )
+        # Zweiter Anker fuer die Sitzungsansicht von Claude Code. Dort ist
+        # das Eingabefeld kein Textfeld mit Beschriftung, sondern ein
+        # benannter Behaelter ("Prompt") um einen contenteditable-Bereich --
+        # composer_pattern greift dort ins Leere. Verglichen wird wieder der
+        # ganze Name, damit ein Chatbeitrag ueber Prompts nicht zum Anker
+        # wird. Gelesen wird ausschliesslich der Name des Behaelters, nie
+        # sein Inhalt: das ist die Eingabe des Nutzers.
+        self.anchor_names = {
+            n.lower()
+            for n in self.cfg.get(
+                "composer_anchor_names", ["prompt", "type / for commands"]
+            )
+        }
+        # Blosser Modellknopf derselben Ansicht ("Fable 5"). Ohne Praefix
+        # und deshalb ganz gebunden, sonst passt jede Zeile, in der ein
+        # Modellname vorkommt.
+        self.bare_model_re = re.compile(
+            self.cfg.get(
+                "bare_model_pattern",
+                r"^(Fable|Opus|Sonnet|Haiku)( [0-9][0-9.]*)?$",
+            ),
+            re.I,
+        )
         self.lookback = self.cfg.get("status_lookback", 12)
+        # In der Sitzungsansicht steht die Statusleiste unter dem
+        # Eingabefeld, nicht darueber. Der Blick nach vorn ist eng gehalten
+        # und trifft nur die Knopfreihe des Eingabebereichs -- der
+        # Chatverlauf liegt davor, nie dahinter.
+        self.lookahead = self.cfg.get("status_lookahead", 8)
         self.require_busy = self.cfg.get("require_busy", True)
         self._fremde_rollen = False
         self._skelett_gemeldet = False
+        self._busy_gemeldet = False
 
     def quelle(self):
         """Welcher Weg liest hier das Fenster: "uia", "atspi" oder None."""
@@ -534,9 +570,14 @@ class UIWatcher:
         model = self.data.get("model")
         if not model:
             return None
-        return self.cfg.get("template", "using cowork with {model}").replace(
-            "{model}", model
-        )
+        # Woher der Modellname stammt, entscheidet die Beschriftung: der
+        # blosse Modellknopf gibt es nur in der Sitzungsansicht von Claude
+        # Code, und "using cowork with Fable 5" waere dort schlicht falsch.
+        if self.data.get("model_source") == "code":
+            template = self.cfg.get("code_template", "using code with {model}")
+        else:
+            template = self.cfg.get("template", "using cowork with {model}")
+        return template.replace("{model}", model)
 
     def status(self):
         text = self.data.get("status")
@@ -678,7 +719,10 @@ class UIWatcher:
         Oberflaeche von Claude."""
         out = {}
         models = []
+        bare_models = []
         composer_at = -1
+        anchor_at = -1
+        anchor_text_at = -1
         for index, (kind, name) in enumerate(nodes):
             if kind == "ButtonControl":
                 if name.lower() in self.stop_names:
@@ -690,10 +734,29 @@ class UIWatcher:
                     )
                     if found:
                         models.append(found.group(0).strip())
+                elif self.bare_model_re.match(name):
+                    bare_models.append(name.strip())
             elif kind == "EditControl" and self.composer_re.search(name):
                 composer_at = index
+            if name.lower() in self.anchor_names:
+                # Der letzte Treffer gewinnt: das Eingabefeld sitzt am Ende
+                # des Baumes, der Chatverlauf davor. Der Behaelter ("Prompt")
+                # ist der bessere Anker als der Platzhaltertext in ihm --
+                # der Platzhalter verschwindet, sobald etwas eingetippt ist.
+                if kind == "TextControl":
+                    anchor_text_at = index
+                else:
+                    anchor_at = index
         if models:
+            # Der beschriftete Knopf ist die belastbarere Quelle und behaelt
+            # den Vortritt; der blosse Knopf springt nur ein, wo es ihn
+            # allein gibt.
             out["model"] = models[-1]
+        elif bare_models:
+            out["model"] = bare_models[-1]
+            out["model_source"] = "code"
+        if composer_at < 0:
+            composer_at = anchor_at if anchor_at >= 0 else anchor_text_at
         out.update(self._read_limits(nodes))
 
         # Die Statuszeile steht unmittelbar ueber dem Eingabefeld. Ohne
@@ -702,9 +765,14 @@ class UIWatcher:
         # sonst dauerhaft falsch beschriftet.
         if composer_at > 0 and (out.get("busy") or not self.require_busy):
             start = max(0, composer_at - self.lookback)
+            # Die Sitzungsansicht haengt ihre Statusleiste unter das
+            # Eingabefeld. Der Blick dahinter reicht nur bis in die
+            # Knopfreihe und kann den Chatverlauf nicht erreichen.
+            stop_at = composer_at + 1 + max(0, self.lookahead)
+            fenster = nodes[start:composer_at] + nodes[composer_at + 1:stop_at]
             candidates = [
                 name
-                for kind, name in nodes[start:composer_at]
+                for kind, name in fenster
                 if kind == "TextControl"
                 and len(name) <= 80
                 and name.endswith(self.STATUS_ENDE)
@@ -715,6 +783,18 @@ class UIWatcher:
                 # Zeile ueber dem Eingabefeld -- so ueberleben auch
                 # Statustexte, die es heute noch nicht gibt.
                 out["status"] = (known or candidates)[-1].rstrip("… .")
+        if out.get("busy") and not self._busy_gemeldet:
+            # Einmalig je Lauf, weil sich zwei Fragen nur im laufenden
+            # Betrieb beantworten lassen: greift der Stop-Knopf, und hat
+            # die Ansicht ueberhaupt eine Statuszeile? Ohne diesen Vermerk
+            # bliebe beides Vermutung. Vermerkt wird nur, ob etwas gefunden
+            # wurde -- der Text selbst gehoert nicht ins Protokoll.
+            self._busy_gemeldet = True
+            logging.info(
+                "UI-Watcher: Antwort laeuft, Anker %s, Statuszeile %s",
+                "gefunden" if composer_at > 0 else "fehlt",
+                "gefunden" if out.get("status") else "keine",
+            )
         return out
 
     # Laufende Statustexte enden mit Auslassungspunkten. Welches Zeichen
@@ -1120,11 +1200,28 @@ class RichPresence:
         self.last_payload = None
 
     def _connect(self):
-        if self.rpc is None:
-            rpc = Presence(self.client_id)
-            rpc.connect()
+        if self.rpc is not None:
+            return
+        # Die Rohrnummern werden einzeln durchprobiert statt pypresence
+        # suchen zu lassen: dessen Suche stolpert ueber verwaiste
+        # Socket-Dateien eines frueheren Discord-Laufs -- 'Connection
+        # refused' bricht dort die ganze Suche ab, obwohl das naechste
+        # Rohr antworten wuerde. Nach einem Rechnerneustart lag genau so
+        # eine Leiche in XDG_RUNTIME_DIR, und die Presence blieb stumm.
+        letzter = None
+        for rohr in range(10):
+            rpc = Presence(self.client_id, pipe=rohr)
+            try:
+                rpc.connect()
+            except Exception as exc:
+                # DiscordNotFound bei fehlendem Rohr, ConnectionRefused
+                # bei einer Leiche -- beides heisst nur: naechstes Rohr.
+                letzter = exc
+                continue
             self.rpc = rpc
-            logging.info("Mit Discord verbunden")
+            logging.info("Mit Discord verbunden (Rohr %d)", rohr)
+            return
+        raise letzter or ConnectionError("kein Discord-IPC-Rohr gefunden")
 
     def update(self, payload):
         try:
