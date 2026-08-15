@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import threading
+import time
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -117,10 +118,14 @@ def call_tool(name, rpc):
         # read_state() faellt auf die Datei des sendenden Prozesses zurueck,
         # falls dieser hier nur Werkzeugaufrufe beantwortet.
         state = dict(rpc.read_state())
+        # Ohne diesen Hinweis sieht eine pausierte Presence genauso aus wie
+        # eine kaputte: die Momentaufnahme ist alt und niemand weiss warum.
+        hinweis = "Presence ist pausiert (presence_resume hebt das auf).\n" \
+            if rpc.is_paused() else ""
         if not state:
-            return ("Noch keine Presence gesendet. Sie erscheint, sobald du "
-                    "im Claude-Fenster arbeitest.")
-        return json.dumps(state, ensure_ascii=False, indent=2)
+            return hinweis + ("Noch keine Presence gesendet. Sie erscheint, "
+                              "sobald du im Claude-Fenster arbeitest.")
+        return hinweis + json.dumps(state, ensure_ascii=False, indent=2)
     raise ValueError("Unbekanntes Werkzeug: %s" % name)
 
 
@@ -152,6 +157,73 @@ def handle(message, rpc):
     raise ValueError("Unbekannte Methode: %s" % method)
 
 
+# Wie oft der Waechter nachsieht und wie lange Claude fehlen darf, bevor
+# er zuschlaegt. Grosszuegig genug, dass ein Neustart der App nicht als
+# Ende gewertet wird, und kurz genug, dass keine Leiche uebernachtet.
+WATCHDOG_TAKT = 15
+WATCHDOG_GEDULD = 90
+
+
+def beenden(grund):
+    """Prozess sofort verlassen, ohne Aufraeumen.
+
+    sys.exit() wuerde nur den aufrufenden Faden verlassen; gehen soll aber
+    der ganze Prozess. Zu retten ist nichts: alles Dauerhafte liegt schon
+    auf Platte, im Speicher steht nur die letzte Momentaufnahme.
+    """
+    try:
+        sys.stderr.write("claude-discord-presence beendet sich: %s\n" % grund)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(0)
+
+
+def start_watchdog(rpc):
+    """Zweiter Weg nach draussen, falls die stdio-Leitung kein Ende meldet.
+
+    Regulaer endet dieser Prozess, wenn Claude Desktop die Leitung
+    schliesst (siehe serve_stdio). Darauf allein zu bauen ist heikel: wird
+    die App hart abgeschossen oder haelt ein anderer Prozess das geerbte
+    Schreibende der Pipe offen, kommt nie ein EOF. Und weil sowohl die
+    Presence-Schleife als auch das Warten in main() endlos sind, laeuft der
+    Prozess dann bis zum Neustart des Rechners weiter.
+
+    Der Waechter schaltet sich bewusst erst scharf, NACHDEM Claude einmal
+    erkannt wurde. Heisst der Hauptprozess auf einem System anders als
+    erwartet -- unter Linux ein bekannter Fall --, beendet er deshalb
+    nichts, sondern passt gar nicht erst auf. Lieber ein Waechter, der
+    schweigt, als einer, der eine gesunde Instanz abraeumt.
+    """
+    try:
+        cfg = rpc.load_config()
+        namen = {n.lower()
+                 for n in (cfg.get("process_names") or rpc.DEFAULT_PROCESS_NAMES)}
+    except Exception:
+        namen = {n.lower() for n in rpc.DEFAULT_PROCESS_NAMES}
+
+    def lauf():
+        scharf = False
+        fehlt_seit = 0.0
+        while True:
+            time.sleep(WATCHDOG_TAKT)
+            try:
+                da = rpc.claude_running(namen)
+            except Exception:
+                # Eine gestoerte Abfrage ist kein Beweis fuer ein Ende.
+                continue
+            if da:
+                scharf = True
+                fehlt_seit = 0.0
+            elif scharf:
+                if not fehlt_seit:
+                    fehlt_seit = time.time()
+                elif time.time() - fehlt_seit >= WATCHDOG_GEDULD:
+                    beenden("Claude Desktop laeuft nicht mehr")
+
+    threading.Thread(target=lauf, name="watchdog", daemon=True).start()
+
+
 def serve_stdio(rpc):
     """JSON-RPC ueber stdin/stdout bedienen.
 
@@ -162,8 +234,7 @@ def serve_stdio(rpc):
     try:
         _serve(rpc)
     finally:
-        sys.stderr.flush()
-        os._exit(0)
+        beenden("stdio-Leitung geschlossen")
 
 
 def _serve(rpc):
@@ -202,6 +273,7 @@ def main():
     # Andersherum verbindet sich pypresence noch, bleibt dann aber im ersten
     # update() haengen -- ohne Fehlermeldung, der Prozess lebt einfach weiter.
     threading.Thread(target=serve_stdio, args=(rpc,), name="mcp", daemon=True).start()
+    start_watchdog(rpc)
     try:
         rpc.main()
     except Exception:

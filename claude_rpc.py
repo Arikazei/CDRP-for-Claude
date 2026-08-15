@@ -53,17 +53,50 @@ logging.basicConfig(
 
 # Vom MCP-Server umschaltbar, damit die Presence pausiert werden kann,
 # ohne den Prozess zu beenden.
-_PAUSED = False
+#
+# Der Schalter liegt als Datei im Datenordner und nicht nur im Speicher:
+# Claude Desktop startet den Server mehrfach, senden tut aber nur die
+# Instanz mit dem Mutex. Beantwortet eine andere den Werkzeugaufruf, setzt
+# sie sonst ihre eigene Variable, waehrend die sendende Instanz weiterlaeuft
+# -- presence_pause meldet dann Erfolg und in Discord aendert sich nichts.
+PAUSE_PATH = DATA_DIR / "paused.flag"
+_PAUSED = PAUSE_PATH.exists()
+_PAUSED_GEPRUEFT = 0.0
 
 
 def set_paused(value):
-    global _PAUSED
+    global _PAUSED, _PAUSED_GEPRUEFT
     _PAUSED = bool(value)
+    _PAUSED_GEPRUEFT = time.time()
+    try:
+        if _PAUSED:
+            PAUSE_PATH.write_text("1", encoding="utf-8")
+        else:
+            PAUSE_PATH.unlink(missing_ok=True)
+    except OSError as exc:
+        # Ohne Datei wirkt die Pause nur in diesem Prozess. Das ist besser
+        # als ein Abbruch, gehoert aber ins Log -- sonst sucht man den
+        # Grund fuer die weiterlaufende Presence spaeter im Discord-Zweig.
+        logging.warning("Pause-Schalter nicht schreibbar (%s)", exc)
     logging.info("Presence %s", "pausiert" if _PAUSED else "aktiv")
     return _PAUSED
 
 
 def is_paused():
+    """Pausenschalter, hoechstens einmal je Sekunde von der Platte gelesen.
+
+    Die Hauptschleife fragt oft, ein Dateizugriff je Durchlauf waere
+    Verschwendung. Ein rein zwischengespeicherter Wert wuerde die Pause aus
+    dem Nachbarprozess dafuer nie mitbekommen.
+    """
+    global _PAUSED, _PAUSED_GEPRUEFT
+    jetzt = time.time()
+    if jetzt - _PAUSED_GEPRUEFT >= 1.0:
+        _PAUSED_GEPRUEFT = jetzt
+        try:
+            _PAUSED = PAUSE_PATH.exists()
+        except OSError:
+            pass
     return _PAUSED
 
 
@@ -1142,6 +1175,13 @@ def main():
         )
         return
 
+    # Der Pausenschalter ueberlebt einen Neustart. Ohne diesen Hinweis
+    # sucht man den Grund fuer eine stumme Presence im Discord-Zweig,
+    # obwohl nur eine Datei im Datenordner liegt.
+    if is_paused():
+        logging.info("Presence ist pausiert (%s) - presence_resume aufrufen "
+                     "oder die Datei loeschen", PAUSE_PATH)
+
     # COM fuer diesen Faden anfordern. Wird claude_rpc eingebettet und die
     # Schleife nicht im Hauptfaden gestartet, scheitert sonst jeder
     # UI-Automation-Aufruf mit "CoInitialize wurde nicht aufgerufen".
@@ -1205,7 +1245,7 @@ def main():
     while True:
         now = time.time()
         try:
-            if _PAUSED:
+            if is_paused():
                 presence.clear()
                 session_start = None
                 time.sleep(max(poll, 5))
