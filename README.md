@@ -91,16 +91,21 @@ ohnehin nur im Minutentakt.
 
 ### Wo Konfiguration und Protokoll liegen
 
-Normalerweise unter `%LOCALAPPDATA%\ClaudeDiscordPresence\` beziehungsweise
-`~/.local/share/ClaudeDiscordPresence/`.
+Unter `%LOCALAPPDATA%\ClaudeDiscordPresence\` beziehungsweise
+`~/.local/share/ClaudeDiscordPresence/`. Im Task-Manager heißt der Prozess
+unter Windows `ClaudeDiscordPresence.exe`, unter Linux `python3`.
 
-**Ausnahme Windows:** Claude Desktop startet Erweiterungen mit
-`server.type: "python"` nicht mit der mitgelieferten Runtime, sondern mit dem
-`python3` aus dem PATH. Ist das das Microsoft-Store-Python, bekommt es ein
-umgeleitetes `%LOCALAPPDATA%` und die Dateien landen unter
+**Bei Fassungen bis einschließlich 1.4.2 lag beides woanders.** Das Manifest
+meldete damals `server.type: "python"`, und Claude Desktop startet solche
+Erweiterungen grundsätzlich mit dem `python3` aus dem PATH statt mit dem
+Befehl aus dem Manifest — die mitgelieferte Runtime blieb ungenutzt. War das
+gefundene Python das aus dem Microsoft Store, bekam es ein umgeleitetes
+`%LOCALAPPDATA%`, und die Dateien landeten unter
 `%LOCALAPPDATA%\Packages\PythonSoftwareFoundation.Python.3.12_*\LocalCache\Local\ClaudeDiscordPresence\`.
-Wer dort ein Protokoll sucht, findet es eine Ebene tiefer. Der Prozess heißt
-dann im Task-Manager `python3.12.exe` statt `ClaudeDiscordPresence.exe`.
+Der Prozess hieß dann `python3.12.exe`. Ab 1.4.3 meldet das Manifest
+`"binary"`, damit greift der Befehl aus `platform_overrides` wieder. Wer von
+einer älteren Fassung kommt, darf den alten Ordner löschen — er wird nicht
+mehr gelesen.
 
 ## Was gelesen wird
 
