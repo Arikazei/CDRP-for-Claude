@@ -177,10 +177,12 @@ powershell -File build_mcpb.ps1  :: dist\*.mcpb bauen
 ```
 
 Die eigene `config.json` bleibt bewusst untracked; Vorlage ist
-`config.example.json`. **Achtung:** `make_default_config.py` erzeugt die
-ausgelieferte Konfiguration aus der *lokalen* `config.json`. Neue Schlüssel
-gehören dort eingetragen, sonst wirft der nächste Bau sie still wieder aus dem
-Paket.
+`config.example.json`. Diese Vorlage ist zugleich die Quelle, aus der
+`make_default_config.py` die ausgelieferte `config.default.json` erzeugt —
+**neue Schlüssel gehören also nach `config.example.json`**, sonst fehlen sie
+im Paket. Sie wird von Hand gepflegt und darf nichts Persönliches enthalten;
+App-ID, Knöpfe, Prozessnamen und Abo-Text werden beim Bauen zusätzlich
+zurückgesetzt.
 
 Der Daemon lässt sich auch ohne MCPB betreiben: `start_claude_rpc.vbs` startet
 `claude_rpc.py` unsichtbar mit der Konfiguration aus `config.json`.
