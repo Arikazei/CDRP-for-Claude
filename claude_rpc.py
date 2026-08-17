@@ -106,6 +106,10 @@ def is_paused():
 LAST_STATE = {}
 _STATE_WRITTEN = 0.0
 
+# Damit die wiederholten Uebernahmeversuche das Protokoll nicht zulaufen
+# lassen: die Meldung "laeuft bereits" gehoert einmal je Prozess hinein.
+_INSTANZ_GEMELDET = False
+
 
 def publish_state():
     """Momentaufnahme in den Datenordner schreiben, hoechstens alle 10 s."""
@@ -1266,10 +1270,17 @@ def main():
         return
 
     if not single_instance():
-        logging.info(
-            "Es laeuft bereits eine Instanz - dieser Prozess beantwortet nur "
-            "Werkzeugaufrufe und sendet selbst keine Presence."
-        )
+        # Nur beim ersten Mal ins Protokoll: der Aufrufer versucht die
+        # Uebernahme im Minutentakt erneut, und jeder Versuch waere sonst
+        # eine Zeile.
+        global _INSTANZ_GEMELDET
+        if not _INSTANZ_GEMELDET:
+            _INSTANZ_GEMELDET = True
+            logging.info(
+                "Es laeuft bereits eine Instanz - dieser Prozess beantwortet "
+                "nur Werkzeugaufrufe und versucht die Uebernahme, sobald die "
+                "sendende Instanz endet."
+            )
         return
 
     # Der Pausenschalter ueberlebt einen Neustart. Ohne diesen Hinweis

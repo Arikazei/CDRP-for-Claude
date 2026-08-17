@@ -163,11 +163,24 @@ if IS_WINDOWS:
 
     def single_instance(name="claude_rpc_presence"):
         """Benannter Mutex - greift auch, wenn die andere Instanz mit einem
-        voellig anderen Interpreter gestartet wurde. Das Handle bleibt
-        absichtlich fuer die Prozesslaufzeit offen."""
+        voellig anderen Interpreter gestartet wurde.
+
+        Nur der Gewinner behaelt sein Handle, und zwar fuer die
+        Prozesslaufzeit. Wer verliert, schliesst seines sofort wieder: ein
+        benanntes Mutex-Objekt lebt so lange, wie IRGENDEIN Prozess ein
+        Handle darauf haelt. Behielten die Antworter ihres, ueberlebte die
+        Sperre den Sender -- danach faende jede neu gestartete Instanz die
+        Sperre belegt vor, obwohl niemand mehr sendet, und die Presence
+        bliebe bis zum letzten Prozessende stumm.
+        """
         global _INSTANCE_LOCK
-        _INSTANCE_LOCK = kernel32.CreateMutexW(None, False, "Local\\" + name)
-        return kernel32.GetLastError() != ERROR_ALREADY_EXISTS
+        handle = kernel32.CreateMutexW(None, False, "Local\\" + name)
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            if handle:
+                kernel32.CloseHandle(handle)
+            return False
+        _INSTANCE_LOCK = handle
+        return True
 
     def claude_config_dir():
         return Path(os.environ.get("APPDATA", "")) / "Claude"
@@ -238,10 +251,15 @@ else:
         wenn der Prozess abstuerzt."""
         global _INSTANCE_LOCK
         runtime = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+        handle = None
         try:
             handle = open(os.path.join(runtime, name + ".lock"), "w")
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
+            # Wer verliert, gibt den Deskriptor sofort zurueck, statt ihn bis
+            # zur naechsten Speicherbereinigung zu halten.
+            if handle is not None:
+                handle.close()
             return False
         _INSTANCE_LOCK = handle
         return True

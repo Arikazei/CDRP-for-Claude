@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "claude-discord-presence", "version": "1.4.3"}
+SERVER_INFO = {"name": "claude-discord-presence", "version": "1.4.4"}
 
 
 def data_dir():
@@ -120,8 +120,14 @@ def call_tool(name, rpc):
         state = dict(rpc.read_state())
         # Ohne diesen Hinweis sieht eine pausierte Presence genauso aus wie
         # eine kaputte: die Momentaufnahme ist alt und niemand weiss warum.
+        pausiert = rpc.is_paused()
         hinweis = "Presence ist pausiert (presence_resume hebt das auf).\n" \
-            if rpc.is_paused() else ""
+            if pausiert else ""
+        # Das Feld in der Momentaufnahme stammt vom letzten Senden und ist
+        # nach einer Pause zwangslaeufig veraltet -- es stuende dann
+        # "paused: false" unter dem Hinweis, dass pausiert ist.
+        if state:
+            state["paused"] = pausiert
         if not state:
             return hinweis + ("Noch keine Presence gesendet. Sie erscheint, "
                               "sobald du im Claude-Fenster arbeitest.")
@@ -162,6 +168,11 @@ def handle(message, rpc):
 # Ende gewertet wird, und kurz genug, dass keine Leiche uebernachtet.
 WATCHDOG_TAKT = 15
 WATCHDOG_GEDULD = 90
+
+# Wie oft eine nicht sendende Instanz versucht, die Sperre zu uebernehmen.
+# Der Versuch kostet einen Mutex-Aufruf, darf also haeufig sein; eine
+# Minute Luecke in der Presence faellt niemandem auf.
+UEBERNAHME_TAKT = 30
 
 
 def beenden(grund):
@@ -274,12 +285,18 @@ def main():
     # update() haengen -- ohne Fehlermeldung, der Prozess lebt einfach weiter.
     threading.Thread(target=serve_stdio, args=(rpc,), name="mcp", daemon=True).start()
     start_watchdog(rpc)
-    try:
-        rpc.main()
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-    # Kehrt zurueck, wenn schon eine Instanz sendet: dann nur noch bedienen.
-    threading.Event().wait()
+    # Kehrt zurueck, wenn schon eine andere Instanz sendet. Frueher wartete
+    # der Prozess danach fuer immer und beantwortete nur noch Werkzeugaufrufe.
+    # Endet die sendende Instanz, sendet dann niemand mehr, obwohl weitere
+    # Instanzen laufen -- die Presence bleibt stumm, bis der letzte Prozess
+    # weg ist. Deshalb wird die Sperre regelmaessig neu versucht: wer sie
+    # bekommt, uebernimmt das Senden.
+    while True:
+        try:
+            rpc.main()
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+        time.sleep(UEBERNAHME_TAKT)
 
 
 if __name__ == "__main__":
