@@ -4,7 +4,7 @@
   "display_name": "Discord Presence for Claude Desktop",
   "version": "1.4.4",
   "description": "Zeigt in Discord an, woran du gerade mit Claude Desktop arbeitest.",
-  "long_description": "Inoffizielle Rich Presence fuer Claude Desktop, fuer Windows und Linux. Liest ausschliesslich lokal: das Claude-Fenster ueber die Barrierefreiheitsschnittstelle des Systems (Windows UI Automation, Linux AT-SPI) fuer Modell und Statuszeile, den Werkzeugverlauf von Desktop Commander sowie die Sitzungs- und Nutzungsdateien der App. Weder Chatinhalte noch Chat-Titel werden erhoben; an Discord gehen nur Modellname, Statuszeile, Auslastung in Prozent und die Abo-Bezeichnung.",
+  "long_description": "Inoffizielle Rich Presence fuer Claude Desktop, fuer Windows und Linux. Liest ausschliesslich lokal: das Claude-Fenster ueber die Barrierefreiheitsschnittstelle des Systems (Windows UI Automation, Linux AT-SPI) fuer Modell und Statuszeile, den Werkzeugverlauf von Desktop Commander sowie die Sitzungs- und Nutzungsdateien der App. Zeigt auf Wunsch auch OpenAI Codex und Google Antigravity an, sofern deren Connectoren installiert sind - alle drei teilen sich eine einzige Presence. Weder Chatinhalte noch Chat-Titel werden erhoben; an Discord gehen nur Produktname, Modellname, Statuszeile, die Art der bearbeiteten Datei (etwa 'a Python file', nie ihr Name oder Pfad), Auslastung in Prozent und die Abo-Bezeichnung.",
   "author": {
     "name": "Arikazei"
   },

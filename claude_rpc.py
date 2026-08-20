@@ -20,6 +20,8 @@ import re
 
 from pypresence import Presence
 
+import beacons
+
 from hostplatform import (
     DEFAULT_PROCESS_NAMES, accessibility_enable, claude_candidates,
     claude_config_dir, claude_focused, claude_running, idle_backend_name,
@@ -1195,13 +1197,47 @@ class LocalUsageWatcher:
         return None
 
 
+def fremd_payload(eintrag, cfg):
+    """Nutzlast, wenn ein anderer Agent den Rahmen besitzt.
+
+    Zeile 1 und Zeile 2 stammen beide aus demselben Beacon -- ein
+    Mischzustand aus der Taetigkeit des einen und dem Modell des anderen
+    waere schlimmer als gar keine Anzeige.
+    """
+    payload = {"details": beacons.zeile_taetigkeit(eintrag)}
+    if eintrag.get("session_start"):
+        payload["start"] = int(eintrag["session_start"])
+    zweite = beacons.zeile_sitzung(eintrag)
+    if zweite:
+        payload["state"] = zweite
+    if cfg.get("large_image_key"):
+        payload["large_image"] = cfg["large_image_key"]
+        payload["large_text"] = cfg.get("large_image_text", "Claude Desktop")
+    aktiv = eintrag["state"] == "working"
+    klein = cfg.get("small_image_key_active" if aktiv
+                    else "small_image_key_open")
+    if klein:
+        payload["small_image"] = klein
+        payload["small_text"] = "Aktiv" if aktiv else "Inaktiv"
+    if cfg.get("buttons"):
+        payload["buttons"] = cfg["buttons"]
+    return payload
+
+
 class RichPresence:
     """Duenner Wrapper um pypresence mit Auto-Reconnect."""
+
+    # Discord drosselt zu haeufige Aktualisierungen nicht, es LEERT die
+    # Presence (discord-api-docs#668). Die dokumentierte Grenze ist ein
+    # Update alle 15 s. Zwischenstaende werden deshalb zusammengefasst;
+    # der neueste gewinnt, sobald das Fenster wieder offen ist.
+    MINDESTABSTAND = 15.0
 
     def __init__(self, client_id):
         self.client_id = client_id
         self.rpc = None
         self.last_payload = None
+        self.last_sent = 0.0
 
     def _connect(self):
         if self.rpc is not None:
@@ -1228,11 +1264,18 @@ class RichPresence:
         raise letzter or ConnectionError("kein Discord-IPC-Rohr gefunden")
 
     def update(self, payload):
+        if payload == self.last_payload:
+            return
+        jetzt = time.time()
+        if jetzt - self.last_sent < self.MINDESTABSTAND:
+            # Nichts merken noetig: die Hauptschleife ruft ohnehin wieder
+            # auf und reicht dann den dann aktuellen Stand herein.
+            return
         try:
             self._connect()
-            if payload != self.last_payload:
-                self.rpc.update(**payload)
-                self.last_payload = payload
+            self.rpc.update(**payload)
+            self.last_payload = payload
+            self.last_sent = jetzt
         except Exception as exc:
             logging.warning("Discord-Update fehlgeschlagen: %s", exc)
             self._reset()
@@ -1338,6 +1381,18 @@ def main():
         re.I,
     )
     presence = RichPresence(client_id)
+    pool = beacons.Pool(DATA_DIR)
+
+    def fremd_zeigen(jetzt):
+        """Zeigt einen anderen Agenten, falls einer den Rahmen besitzt.
+
+        Rueckgabe True heisst: die Presence gehoert gerade nicht Claude.
+        """
+        rahmen = beacons.rahmen_waehlen(pool.lesen(jetzt))
+        if rahmen is None or rahmen["client"] == "claude":
+            return False
+        presence.update(fremd_payload(rahmen, cfg))
+        return True
 
     # Die Abo-Stufe steht im Nutzungsfenster ("Max (5x)") und wird von dort
     # uebernommen. plan_override greift, solange sie noch nie gesehen wurde.
@@ -1360,9 +1415,15 @@ def main():
                 continue
 
             if not claude_running(process_names):
-                presence.clear()
+                # Claude ist weg, aber Codex oder Antigravity arbeiten
+                # vielleicht weiter. Erst danach wirklich abschalten.
+                beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None)
                 session_start = None
                 last_active = 0.0
+                if fremd_zeigen(now):
+                    time.sleep(poll)
+                    continue
+                presence.clear()
                 # Heisst der Hauptprozess auf diesem System anders, sitzt man
                 # sonst vor einer stummen Presence und raet. Hoechstens
                 # stuendlich, damit das Log nicht zulaeuft.
@@ -1390,8 +1451,12 @@ def main():
 
             show = bool(last_active) and (now - last_active) <= idle_timeout
             if not show:
-                presence.clear()
+                beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None)
                 session_start = None
+                if fremd_zeigen(now):
+                    time.sleep(poll)
+                    continue
+                presence.clear()
                 time.sleep(poll)
                 continue
 
@@ -1457,7 +1522,17 @@ def main():
                 payload["small_text"] = "Aktiv" if currently_active else "Inaktiv"
             if cfg.get("buttons"):
                 payload["buttons"] = cfg["buttons"]
-            presence.update(payload)
+            # Claude arbeitet -- aber vielleicht hat ein anderer Agent
+            # gerade juenger etwas getan. Der Rahmen gehoert genau einem.
+            beacons.eigenen_schreiben(
+                DATA_DIR,
+                "working" if currently_active else "waiting",
+                "thinking",
+                None,
+                session_start,
+            )
+            if not fremd_zeigen(now):
+                presence.update(payload)
             LAST_STATE.update({
                 "updated_at": int(now),
                 "details": payload.get("details"),

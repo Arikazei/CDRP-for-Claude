@@ -125,6 +125,11 @@ Aktivität, Auslastung in Prozent und die Abo-Bezeichnung.
   ausgegebene Betrag bleiben ausdrücklich außen vor.
 - Systemweit nur: läuft Claude, ist es im Vordergrund, wann war die letzte
   Eingabe. Zeitstempel und Fenstername, keine Inhalte.
+- **Beacons anderer Agenten**, falls deren Connectoren installiert sind:
+  `<Datenordner>\beacons\*.json`. Darin steht ausschließlich eine feste
+  Marke je Feld — Produktname, Modellname, eine von acht Tätigkeiten und
+  eine von 21 Dateiarten. Freitext ist im Format nicht vorgesehen, ein
+  Dateiname oder Pfad kann dort also gar nicht stehen.
 
 **Chat-Titel werden gar nicht erst erhoben** — nicht abschaltbar, weil es dafür
 keinen Schalter braucht. Was nicht gelesen wird, kann auch nicht versehentlich
