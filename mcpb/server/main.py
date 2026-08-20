@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 sys.path.insert(0, HERE)
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "claude-discord-presence", "version": "1.4.4"}
+SERVER_INFO = {"name": "claude-discord-presence", "version": "1.5.0"}
 
 
 def data_dir():
