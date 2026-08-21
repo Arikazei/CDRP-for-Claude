@@ -18,6 +18,24 @@ from pathlib import Path
 
 FELDER = {"v", "client", "display_name", "state", "action",
           "model", "session_start", "updated_at", "file_kind"}
+
+# Vertrag 1.1. Zusatzfelder sind freiwillig; ein Beacon ohne sie bleibt
+# gueltig. Sie sind bewusst eng gefasst, weil hier zum ersten Mal Text
+# eines Produzenten in die Presence gelangen koennte. Deshalb:
+#
+#   plan   -- kurz, und nur Zeichen, aus denen sich kein zweiter Satz
+#             bauen laesst. Der Master rendert ihn ueber seine eigene
+#             Vorlage, der Produzent liefert nur den nackten Namen.
+#   usage  -- gar kein Text, sondern ganze Zahlen. Formuliert wird erst
+#             hier. Semantik ist VERBRAUCHT in Prozent, nicht
+#             verbleibend: Antigravity zeigt "Weekly Limit Remaining
+#             97%", Claude zeigt den verbrauchten Anteil. Stuende in
+#             derselben Zeile mal das eine, mal das andere, faellt es
+#             niemandem auf und alle Zahlen waeren wertlos.
+ZUSATZFELDER = {"plan", "usage"}
+PLAN_MAX = 32
+RE_PLAN = re.compile(r"^[A-Za-z0-9 ()×.+/-]{1,%d}$" % PLAN_MAX)
+USAGE_SCHLUESSEL = ("five_hour", "week")
 ZUSTAENDE = ("working", "waiting", "idle")
 AKTIONEN = {
     "thinking", "reading", "editing", "running_tests",
@@ -94,9 +112,45 @@ def beacon_ordner(datenordner, systemweit=True):
     return eindeutig
 
 
+def plan_saeubern(wert):
+    """Abo-Bezeichnung eines Produzenten annehmen -- oder verwerfen.
+
+    Kein Kuerzen, kein Ersetzen: was nicht passt, fliegt ganz raus. Ein
+    stillschweigend zurechtgeschnittener Text waere genau die Art von
+    Halbheit, die spaeter niemand mehr nachvollzieht.
+    """
+    if not isinstance(wert, str):
+        return None
+    wert = wert.strip()
+    return wert if RE_PLAN.match(wert) else None
+
+
+def usage_saeubern(wert):
+    """Auslastung eines Produzenten annehmen -- ganze Prozent, 0 bis 100."""
+    if not isinstance(wert, dict):
+        return None
+    sauber = {}
+    for schluessel in USAGE_SCHLUESSEL:
+        zahl = wert.get(schluessel)
+        if isinstance(zahl, bool) or not isinstance(zahl, int):
+            continue
+        if 0 <= zahl <= 100:
+            sauber[schluessel] = zahl
+    return sauber or None
+
+
 def pruefen(daten, slug):
-    """Gibt den Eintrag zurueck oder None. Im Zweifel None (fail closed)."""
-    if not isinstance(daten, dict) or set(daten) != FELDER:
+    """Gibt den Eintrag zurueck oder None. Im Zweifel None (fail closed).
+
+    Pflichtfelder muessen exakt stimmen. Zusatzfelder duerfen fehlen und
+    werden einzeln geprueft: ein unbrauchbares Zusatzfeld verwirft nur
+    sich selbst, nicht den ganzen Beacon -- sonst verschwaende ein
+    Tippfehler im Abo-Namen die gesamte Anzeige des Clients.
+    """
+    if not isinstance(daten, dict):
+        return None
+    vorhanden = set(daten)
+    if not FELDER <= vorhanden or not (vorhanden - FELDER) <= ZUSATZFELDER:
         return None
     if daten.get("v") != 1 or daten.get("client") != slug:
         return None
@@ -110,7 +164,16 @@ def pruefen(daten, slug):
     zeit = daten.get("updated_at")
     if not isinstance(zeit, int) or isinstance(zeit, bool):
         return None
-    return daten
+    geprueft = dict(daten)
+    for schluessel, saeubern in (("plan", plan_saeubern),
+                                 ("usage", usage_saeubern)):
+        if schluessel in geprueft:
+            sauber = saeubern(geprueft[schluessel])
+            if sauber is None:
+                geprueft.pop(schluessel)
+            else:
+                geprueft[schluessel] = sauber
+    return geprueft
 
 
 def verfallen(daten, jetzt):
@@ -247,23 +310,45 @@ def zeilen_sitzung(eintrag, cfg=None):
     """Zeile 2 als Liste: alles, was ueber diesen Client bekannt ist.
 
     Der Aufrufer wechselt zwischen den Teilen durch, so wie Claude
-    zwischen Sitzung, Auslastung und Abo wechselt. Fuer fremde Clients
-    gibt es Auslastung und Kontingent bewusst nicht: es existiert keine
-    lokal lesbare Quelle dafuer, und Anbieter-APIs abzufragen oder Token
-    auszulesen ist in diesem Projekt gesperrt (SPEC-beacon-v1). Was hier
-    stehen kann, ist deshalb entweder gemessen (Modell) oder von Hand
-    eingetragen (Abo-Bezeichnung je Client).
+    zwischen Sitzung, Auslastung und Abo wechselt.
+
+    Alles hier kommt aus dem Fenster des jeweiligen Clients oder aus der
+    Konfiguration -- nie aus einer Anbieter-Schnittstelle und nie aus
+    einem Zugangstoken. Antigravity zeigt Plan und Limits in
+    "Einstellungen -> Models & Usage", und genau von dort liest sein
+    Waechter sie ab, so wie Claude sie aus seinem Nutzungsfenster liest.
     """
+    cfg = cfg or {}
     teile = []
     if eintrag.get("model"):
         teile.append("using %s with %s"
                      % (eintrag["display_name"], eintrag["model"]))
-    marken = ((cfg or {}).get("client_plans") or {})
-    marke = marken.get(eintrag["client"])
-    if isinstance(marke, str) and marke.strip():
-        vorlage = ((cfg or {}).get("plan") or {}).get(
-            "template", "Abonnement: {plan}")
-        teile.append(vorlage.replace("{plan}", marke.strip()))
+
+    # Auslastung. Beschriftet wie bei Claude, damit in derselben Zeile
+    # nicht zwei Sprachen stehen.
+    usage = eintrag.get("usage") or {}
+    beschriftung = cfg.get("local_usage") or {}
+    stuecke = []
+    for schluessel, vorgabe, name in (
+            ("five_hour", "5h", "label_5h"),
+            ("week", "Woche", "label_week")):
+        if schluessel in usage:
+            stuecke.append("%s %d%%" % (beschriftung.get(name, vorgabe),
+                                        usage[schluessel]))
+    if stuecke:
+        teile.append(" · ".join(stuecke))
+
+    # Abo. Der abgelesene Wert gilt; der von Hand eingetragene greift,
+    # solange keiner abgelesen wurde -- dieselbe Regel wie bei Claude,
+    # wo plan_override nur bis zum ersten Blick ins Nutzungsfenster gilt.
+    marke = eintrag.get("plan")
+    if not marke:
+        hand = (cfg.get("client_plans") or {}).get(eintrag["client"])
+        if isinstance(hand, str) and hand.strip():
+            marke = hand.strip()
+    if marke:
+        vorlage = (cfg.get("plan") or {}).get("template", "Abonnement: {plan}")
+        teile.append(vorlage.replace("{plan}", marke))
     return teile
 
 

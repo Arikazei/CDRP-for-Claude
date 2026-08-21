@@ -126,6 +126,62 @@ class Texte(unittest.TestCase):
         self.assertEqual(teile, [])
 
 
+class Zusatzfelder(unittest.TestCase):
+    """Vertrag 1.1: plan und usage sind freiwillig und eng gefasst."""
+
+    def test_ohne_zusatz_weiter_gueltig(self):
+        self.assertIsNotNone(beacons.pruefen(eintrag(), "codex"))
+
+    def test_plan_wird_uebernommen(self):
+        e = eintrag()
+        e["plan"] = "Google AI Pro"
+        self.assertEqual(beacons.pruefen(e, "codex")["plan"], "Google AI Pro")
+
+    def test_zu_langer_plan_fliegt_raus_beacon_bleibt(self):
+        e = eintrag()
+        e["plan"] = "x" * 40
+        geprueft = beacons.pruefen(e, "codex")
+        self.assertIsNotNone(geprueft)
+        self.assertNotIn("plan", geprueft)
+
+    def test_plan_mit_zeilenumbruch_fliegt_raus(self):
+        # Sonst koennte ein Produzent eine zweite Zeile in die Presence
+        # schreiben, an der Vorlage des Masters vorbei.
+        e = eintrag()
+        e["plan"] = "Pro\nirgendwas"
+        self.assertNotIn("plan", beacons.pruefen(e, "codex"))
+
+    def test_usage_nur_ganze_prozente(self):
+        e = eintrag()
+        e["usage"] = {"five_hour": 8, "week": 3, "monat": 5}
+        sauber = beacons.pruefen(e, "codex")["usage"]
+        self.assertEqual(sauber, {"five_hour": 8, "week": 3})
+
+    def test_usage_ausserhalb_der_spanne(self):
+        e = eintrag()
+        e["usage"] = {"five_hour": 140, "week": -1}
+        self.assertNotIn("usage", beacons.pruefen(e, "codex"))
+
+    def test_unbekanntes_feld_verwirft_alles(self):
+        e = eintrag()
+        e["nachricht"] = "hallo"
+        self.assertIsNone(beacons.pruefen(e, "codex"))
+
+    def test_zeile_zeigt_auslastung_und_abo(self):
+        e = eintrag(model=None)
+        e["usage"] = {"five_hour": 8, "week": 3}
+        e["plan"] = "Google AI Pro"
+        self.assertEqual(beacons.zeilen_sitzung(e),
+                         ["5h 8% · Woche 3%", "Abonnement: Google AI Pro"])
+
+    def test_abgelesenes_abo_schlaegt_handeintrag(self):
+        e = eintrag(model=None)
+        e["plan"] = "Google AI Ultra"
+        cfg = {"client_plans": {"codex": "von Hand"}}
+        self.assertEqual(beacons.zeilen_sitzung(e, cfg),
+                         ["Abonnement: Google AI Ultra"])
+
+
 class Karussell(unittest.TestCase):
 
     EIGEN = {"details": "Claude Desktop", "start": 500, "aktiv": True,
