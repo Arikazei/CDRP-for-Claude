@@ -1207,9 +1207,16 @@ def fremd_payload(eintrag, cfg):
     payload = {"details": beacons.zeile_taetigkeit(eintrag)}
     if eintrag.get("session_start"):
         payload["start"] = int(eintrag["session_start"])
-    zweite = beacons.zeile_sitzung(eintrag)
-    if zweite:
-        payload["state"] = zweite
+    # Dieselbe Rotation wie bei Claude: mehrere Angaben wechseln sich in
+    # Zeile 2 ab, statt sich mit " · " zu einer zu langen Zeile zu addieren.
+    teile = beacons.zeilen_sitzung(eintrag, cfg)
+    if teile:
+        sl = cfg.get("state_line", {})
+        if sl.get("mode", "alternate") == "alternate" and len(teile) > 1:
+            schritt = max(15, sl.get("alternate_seconds", 20))
+            payload["state"] = teile[int(time.time() / schritt) % len(teile)]
+        else:
+            payload["state"] = " · ".join(teile)
     if cfg.get("large_image_key"):
         payload["large_image"] = cfg["large_image_key"]
         payload["large_text"] = cfg.get("large_image_text", "Claude Desktop")

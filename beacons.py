@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 
 FELDER = {"v", "client", "display_name", "state", "action",
           "model", "session_start", "updated_at", "file_kind"}
@@ -54,6 +55,43 @@ DATEIART = {
     "text": "text", "config": "config", "image": "image", "data": "data",
     "other": "",
 }
+
+
+def beacon_ordner(datenordner, systemweit=True):
+    """Alle Ordner, in denen Beacons liegen koennen -- der eigene zuerst.
+
+    Windows leitet %LOCALAPPDATA% fuer Anwendungen aus dem Microsoft Store
+    still um. Die Store-Fassung von Claude Desktop landet deshalb in
+    ...\\Packages\\Claude_*\\LocalCache\\Local\\ClaudeDiscordPresence,
+    waehrend der Codex-Hook und der Antigravity-Waechter als gewoehnliche
+    Prozesse laufen und im echten Ordner schreiben. Beide Seiten glauben,
+    denselben Pfad zu benutzen, und sehen einander nie. Gemessen am
+    21.08.2026: der eigene Zustand lag in LocalCache, der von Codex im
+    echten Ordner, und die Presence blieb bei Claude stehen.
+
+    Gelesen wird deshalb, was erreichbar ist. Geschrieben wird weiterhin
+    nur in den eigenen Ordner -- niemand soll fremde Ablagen anlegen.
+    """
+    ordner = [Path(datenordner) / "beacons"]
+    if systemweit and os.name == "nt":
+        profil = os.environ.get("USERPROFILE")
+        if profil:
+            lokal = Path(profil) / "AppData" / "Local"
+            ordner.append(lokal / "ClaudeDiscordPresence" / "beacons")
+            try:
+                for paket in sorted((lokal / "Packages").glob("Claude_*")):
+                    ordner.append(paket / "LocalCache" / "Local"
+                                  / "ClaudeDiscordPresence" / "beacons")
+            except OSError:
+                pass
+    gesehen = set()
+    eindeutig = []
+    for pfad in ordner:
+        schluessel = os.path.normcase(str(pfad))
+        if schluessel not in gesehen:
+            gesehen.add(schluessel)
+            eindeutig.append(pfad)
+    return eindeutig
 
 
 def pruefen(daten, slug):
@@ -102,11 +140,26 @@ def rahmen_waehlen(eintraege):
         passend = [e for e in eintraege if e["state"] == zustand]
         if passend:
             return max(passend, key=lambda e: e["updated_at"])
+    # Leerlauf zaehlt nur fuer fremde Clients. Claude Desktop hat fuer den
+    # eigenen Leerlauf schon einen Weg -- den Leerlauftext aus der
+    # Einstellung. Stuende der eigene Beacon hier mit in der Auswahl,
+    # gewaenne er praktisch immer: er wird bei jedem Durchlauf neu
+    # geschrieben und ist damit fast immer der juengste.
+    ruhend = [e for e in eintraege
+              if e["state"] == "idle" and e["client"] != "claude"]
+    if ruhend:
+        return max(ruhend, key=lambda e: e["updated_at"])
     return None
 
 
 def zeile_taetigkeit(eintrag):
-    """Zeile 1: was dieser Client gerade tut."""
+    """Zeile 1: was dieser Client gerade tut.
+
+    Im Leerlauf steht dort nur der Name -- genau wie Claude Desktop im
+    Leerlauf "Claude Desktop" zeigt und nicht "Claude Desktop · idle".
+    """
+    if eintrag["state"] == "idle" or eintrag["action"] == "idle":
+        return eintrag["display_name"]
     text = AKTIONSTEXT.get(eintrag["action"], "working")
     art = eintrag.get("file_kind")
     if art and eintrag["action"] in ("reading", "editing"):
@@ -115,38 +168,73 @@ def zeile_taetigkeit(eintrag):
     return "%s · %s" % (eintrag["display_name"], text)
 
 
-def zeile_sitzung(eintrag):
-    """Zeile 2: Sitzung des Rahmenbesitzers, oder nichts."""
-    if not eintrag.get("model"):
-        return None
-    return "using %s with %s" % (eintrag["display_name"], eintrag["model"])
+def zeilen_sitzung(eintrag, cfg=None):
+    """Zeile 2 als Liste: alles, was ueber diesen Client bekannt ist.
+
+    Der Aufrufer wechselt zwischen den Teilen durch, so wie Claude
+    zwischen Sitzung, Auslastung und Abo wechselt. Fuer fremde Clients
+    gibt es Auslastung und Kontingent bewusst nicht: es existiert keine
+    lokal lesbare Quelle dafuer, und Anbieter-APIs abzufragen oder Token
+    auszulesen ist in diesem Projekt gesperrt (SPEC-beacon-v1). Was hier
+    stehen kann, ist deshalb entweder gemessen (Modell) oder von Hand
+    eingetragen (Abo-Bezeichnung je Client).
+    """
+    teile = []
+    if eintrag.get("model"):
+        teile.append("using %s with %s"
+                     % (eintrag["display_name"], eintrag["model"]))
+    marken = ((cfg or {}).get("client_plans") or {})
+    marke = marken.get(eintrag["client"])
+    if isinstance(marke, str) and marke.strip():
+        vorlage = ((cfg or {}).get("plan") or {}).get(
+            "template", "Abonnement: {plan}")
+        teile.append(vorlage.replace("{plan}", marke.strip()))
+    return teile
+
+
+def zeile_sitzung(eintrag, cfg=None):
+    """Zeile 2 als einzelner Text -- None, wenn nichts bekannt ist."""
+    teile = zeilen_sitzung(eintrag, cfg)
+    return " · ".join(teile) if teile else None
 
 
 class Pool:
     """Liest die Beacon-Dateien der anderen Agenten."""
 
-    def __init__(self, datenordner):
-        self.ordner = datenordner / "beacons"
+    def __init__(self, datenordner, systemweit=True):
+        # systemweit=False haelt Tests hermetisch: sonst laese ein Pool
+        # ueber einem Wegwerfordner die echten Beacons des Rechners mit.
+        self.ordner = beacon_ordner(datenordner, systemweit)
         self._gemeldet = set()
 
     def lesen(self, jetzt=None):
         jetzt = time.time() if jetzt is None else jetzt
+        # Derselbe Client kann in mehreren Ordnern liegen (siehe
+        # beacon_ordner). Dann gilt der juengste Eintrag, nicht der aus
+        # dem zuerst durchsuchten Ordner -- sonst wuerde eine alte Leiche
+        # den frischen Zustand verdecken.
+        neueste = {}
+        for ordner in self.ordner:
+            try:
+                dateien = sorted(ordner.glob("*.json"))
+            except OSError:
+                continue
+            for pfad in dateien:
+                slug = pfad.stem
+                # Produzenten legen Beistelldateien daneben, etwa
+                # "codex.state.json" fuer zustandslose Hooks. Deren Stamm
+                # enthaelt einen Punkt. Ohne diese Zeile wuerde der Pool
+                # sie bei jedem Durchlauf lesen, verwerfen, protokollieren.
+                if "." in slug or not RE_SLUG.match(slug):
+                    continue
+                daten = self._laden(pfad, slug)
+                if daten is None:
+                    continue
+                alt = neueste.get(slug)
+                if alt is None or daten["updated_at"] > alt["updated_at"]:
+                    neueste[slug] = daten
         eintraege = []
-        try:
-            dateien = sorted(self.ordner.glob("*.json"))
-        except OSError:
-            return eintraege
-        for pfad in dateien:
-            slug = pfad.stem
-            # Produzenten legen Beistelldateien daneben, etwa
-            # "codex.state.json" fuer zustandslose Hooks. Deren Stamm
-            # enthaelt einen Punkt. Ohne diese Zeile wuerde der Pool sie
-            # bei jedem Durchlauf lesen, verwerfen und protokollieren.
-            if "." in slug or not RE_SLUG.match(slug):
-                continue
-            daten = self._laden(pfad, slug)
-            if daten is None:
-                continue
+        for daten in neueste.values():
             eintrag = verfallen(daten, jetzt)
             if eintrag is not None:
                 eintraege.append(eintrag)

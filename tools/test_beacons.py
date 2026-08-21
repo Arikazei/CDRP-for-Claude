@@ -73,9 +73,21 @@ class Rahmen(unittest.TestCase):
         b = eintrag(client="claude", updated_at=200)
         self.assertEqual(beacons.rahmen_waehlen([a, b])["client"], "claude")
 
-    def test_nur_idle_heisst_kein_rahmen(self):
-        a = eintrag(state="idle", action="idle")
+    def test_fremder_im_leerlauf_bekommt_den_rahmen(self):
+        # Antigravity offen, aber untaetig: Discord soll den Namen zeigen,
+        # so wie Claude Desktop im Leerlauf seinen Namen zeigt.
+        a = eintrag(client="codex", state="idle", action="idle")
+        self.assertEqual(beacons.rahmen_waehlen([a])["client"], "codex")
+
+    def test_eigener_leerlauf_bekommt_ihn_nicht(self):
+        a = eintrag(client="claude", state="idle", action="idle")
         self.assertIsNone(beacons.rahmen_waehlen([a]))
+
+    def test_arbeit_schlaegt_fremden_leerlauf(self):
+        a = eintrag(client="codex", state="idle", action="idle",
+                    updated_at=9999)
+        b = eintrag(client="claude", state="working", updated_at=1)
+        self.assertEqual(beacons.rahmen_waehlen([a, b])["client"], "claude")
 
     def test_leer(self):
         self.assertIsNone(beacons.rahmen_waehlen([]))
@@ -99,6 +111,20 @@ class Texte(unittest.TestCase):
     def test_sitzung_ohne_modell(self):
         self.assertIsNone(beacons.zeile_sitzung(eintrag(model=None)))
 
+    def test_leerlauf_zeigt_nur_den_namen(self):
+        e = eintrag(state="idle", action="idle", file_kind=None)
+        self.assertEqual(beacons.zeile_taetigkeit(e), "OpenAI Codex")
+
+    def test_abo_je_client_wird_ergaenzt(self):
+        cfg = {"client_plans": {"codex": "ChatGPT Plus"}}
+        teile = beacons.zeilen_sitzung(eintrag(), cfg)
+        self.assertEqual(teile[-1], "Abonnement: ChatGPT Plus")
+
+    def test_abo_eines_anderen_clients_greift_nicht(self):
+        cfg = {"client_plans": {"antigravity": "Google AI Pro"}}
+        teile = beacons.zeilen_sitzung(eintrag(model=None), cfg)
+        self.assertEqual(teile, [])
+
 
 class PoolLesen(unittest.TestCase):
 
@@ -112,11 +138,31 @@ class PoolLesen(unittest.TestCase):
             # Genau die Datei, die der Codex-Connector daneben ablegt.
             (ordner / "codex.state.json").write_text(
                 json.dumps({"irgendwas": 1}), encoding="utf-8")
-            pool = beacons.Pool(Path(tmp))
+            pool = beacons.Pool(Path(tmp), systemweit=False)
             gelesen = pool.lesen(jetzt)
             self.assertEqual([e["client"] for e in gelesen], ["codex"])
             # Und keine Warnung ueber die Beistelldatei:
             self.assertEqual(pool._gemeldet, set())
+
+    def test_juengster_ordner_gewinnt(self):
+        # Windows leitet %LOCALAPPDATA% fuer Store-Apps um: derselbe Client
+        # kann in zwei Ordnern liegen. Der frischere Eintrag zaehlt, nicht
+        # der aus dem zuerst durchsuchten Ordner.
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            alt, neu = Path(a) / "beacons", Path(b) / "beacons"
+            alt.mkdir()
+            neu.mkdir()
+            (alt / "codex.json").write_text(
+                json.dumps(eintrag(action="thinking", updated_at=1000)),
+                encoding="utf-8")
+            (neu / "codex.json").write_text(
+                json.dumps(eintrag(action="reading", updated_at=1990)),
+                encoding="utf-8")
+            pool = beacons.Pool(Path(a), systemweit=False)
+            pool.ordner = [alt, neu]
+            gelesen = pool.lesen(2000)
+            self.assertEqual(len(gelesen), 1)
+            self.assertEqual(gelesen[0]["action"], "reading")
 
 
 if __name__ == "__main__":
