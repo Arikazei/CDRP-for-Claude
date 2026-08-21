@@ -126,6 +126,69 @@ class Texte(unittest.TestCase):
         self.assertEqual(teile, [])
 
 
+class Karussell(unittest.TestCase):
+
+    EIGEN = {"details": "Claude Desktop", "start": 500, "aktiv": True,
+             "zeilen": ["using cowork with Opus", "5h: 40%",
+                        "Abonnement: Max (5x)"]}
+
+    def test_arbeiter_nur_bei_working(self):
+        a = eintrag(client="codex", state="waiting", updated_at=9999)
+        b = eintrag(client="antigravity", state="idle", action="idle")
+        self.assertIsNone(beacons.arbeiter([a, b]))
+
+    def test_arbeiter_juengster_gewinnt(self):
+        a = eintrag(client="codex", state="working", updated_at=100)
+        b = eintrag(client="antigravity", state="working", updated_at=200)
+        self.assertEqual(beacons.arbeiter([a, b])["client"], "antigravity")
+
+    def test_volle_runde_durch_alle_clients(self):
+        fremde = [
+            eintrag(client="codex", display_name="OpenAI Codex",
+                    state="idle", action="idle", model="GPT-5.6 Sol"),
+            eintrag(client="antigravity", display_name="Google Antigravity",
+                    state="idle", action="idle", model=None),
+        ]
+        liste = beacons.karten(self.EIGEN, fremde)
+        # Drei Zeilen von Claude, dann Antigravity, dann Codex.
+        self.assertEqual([k["client"] for k in liste],
+                         ["claude", "claude", "claude",
+                          "antigravity", "codex"])
+        self.assertEqual(liste[3]["details"], "Google Antigravity")
+        self.assertIsNone(liste[3]["zeile"])
+        self.assertEqual(liste[4]["details"], "OpenAI Codex")
+        self.assertEqual(liste[4]["zeile"],
+                         "using OpenAI Codex with GPT-5.6 Sol")
+
+    def test_ohne_eigenen_nur_fremde(self):
+        fremde = [eintrag(client="codex", state="idle", action="idle",
+                          model=None)]
+        liste = beacons.karten(None, fremde)
+        self.assertEqual([k["client"] for k in liste], ["codex"])
+
+    def test_ohne_rotation_eine_zeile(self):
+        cfg = {"state_line": {"mode": "off"}}
+        liste = beacons.karten(self.EIGEN, [], cfg)
+        self.assertEqual(len(liste), 1)
+        self.assertIn(" · ", liste[0]["zeile"])
+
+    def test_wechsel_laeuft_rundherum(self):
+        liste = beacons.karten(self.EIGEN, [])
+        gesehen = [beacons.karte_waehlen(liste, t, 20)["zeile"]
+                   for t in (0, 20, 40, 60)]
+        self.assertEqual(gesehen[0], gesehen[3])
+        self.assertEqual(len(set(gesehen)), 3)
+
+    def test_takt_faellt_nie_unter_discords_grenze(self):
+        # Unter 15 s leert Discord die Presence, statt zu drosseln.
+        liste = beacons.karten(self.EIGEN, [])
+        self.assertEqual(beacons.karte_waehlen(liste, 0, 1)["zeile"],
+                         beacons.karte_waehlen(liste, 14, 1)["zeile"])
+
+    def test_leere_liste(self):
+        self.assertIsNone(beacons.karte_waehlen([], 0, 20))
+
+
 class PoolLesen(unittest.TestCase):
 
     def test_beistelldatei_wird_ignoriert(self):

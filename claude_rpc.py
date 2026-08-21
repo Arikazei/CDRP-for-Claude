@@ -1197,30 +1197,23 @@ class LocalUsageWatcher:
         return None
 
 
-def fremd_payload(eintrag, cfg):
-    """Nutzlast, wenn ein anderer Agent den Rahmen besitzt.
+def karte_payload(karte, cfg):
+    """Eine Karte von beacons.karten() zur Discord-Nutzlast machen.
 
-    Zeile 1 und Zeile 2 stammen beide aus demselben Beacon -- ein
-    Mischzustand aus der Taetigkeit des einen und dem Modell des anderen
-    waere schlimmer als gar keine Anzeige.
+    Bild, Knopf und Beschriftung kommen aus derselben Konfiguration --
+    egal, welcher Client die Karte gestellt hat. Die Presence soll wie
+    eine Anzeige wirken, die durch mehrere Clients wandert, und nicht wie
+    drei Anzeigen, die sich abwechselnd hineindraengen.
     """
-    payload = {"details": beacons.zeile_taetigkeit(eintrag)}
-    if eintrag.get("session_start"):
-        payload["start"] = int(eintrag["session_start"])
-    # Dieselbe Rotation wie bei Claude: mehrere Angaben wechseln sich in
-    # Zeile 2 ab, statt sich mit " · " zu einer zu langen Zeile zu addieren.
-    teile = beacons.zeilen_sitzung(eintrag, cfg)
-    if teile:
-        sl = cfg.get("state_line", {})
-        if sl.get("mode", "alternate") == "alternate" and len(teile) > 1:
-            schritt = max(15, sl.get("alternate_seconds", 20))
-            payload["state"] = teile[int(time.time() / schritt) % len(teile)]
-        else:
-            payload["state"] = " · ".join(teile)
+    payload = {"details": karte["details"]}
+    if karte.get("start"):
+        payload["start"] = int(karte["start"])
+    if karte.get("zeile"):
+        payload["state"] = karte["zeile"]
     if cfg.get("large_image_key"):
         payload["large_image"] = cfg["large_image_key"]
         payload["large_text"] = cfg.get("large_image_text", "Claude Desktop")
-    aktiv = eintrag["state"] == "working"
+    aktiv = bool(karte.get("aktiv"))
     klein = cfg.get("small_image_key_active" if aktiv
                     else "small_image_key_open")
     if klein:
@@ -1390,16 +1383,40 @@ def main():
     presence = RichPresence(client_id)
     pool = beacons.Pool(DATA_DIR)
 
-    def fremd_zeigen(jetzt):
-        """Zeigt einen anderen Agenten, falls einer den Rahmen besitzt.
+    wechsel_takt = (cfg.get("state_line") or {}).get("alternate_seconds", 20)
 
-        Rueckgabe True heisst: die Presence gehoert gerade nicht Claude.
+    def anzeigen(jetzt, eigen=None):
+        """Waehlt aus, wer gerade zu sehen ist, und sendet ihn.
+
+        Zwei Regeln, mehr nicht:
+
+        Erstens -- arbeitet gerade jemand wirklich, gehoert ihm die
+        Anzeige allein, und zwar dem juengsten. Wer tippt, will nicht
+        alle zwanzig Sekunden von einem ruhenden Nachbarn verdraengt
+        werden.
+
+        Zweitens -- arbeitet niemand, wandert die Anzeige der Reihe nach
+        durch alle offenen Clients und dort durch alles, was ueber sie
+        bekannt ist. Erst Claude mit Sitzung, Auslastung und Abo, dann
+        Antigravity, dann Codex, dann wieder von vorn.
+
+        Rueckgabe ist die gesendete Nutzlast oder None.
         """
-        rahmen = beacons.rahmen_waehlen(pool.lesen(jetzt))
-        if rahmen is None or rahmen["client"] == "claude":
-            return False
-        presence.update(fremd_payload(rahmen, cfg))
-        return True
+        eintraege = pool.lesen(jetzt)
+        chef = beacons.arbeiter(eintraege)
+        if chef is None:
+            liste = beacons.karten(
+                eigen, [e for e in eintraege if e["client"] != "claude"], cfg)
+        elif chef["client"] == "claude":
+            liste = beacons.karten(eigen, [], cfg)
+        else:
+            liste = beacons.karten(None, [chef], cfg)
+        karte = beacons.karte_waehlen(liste, jetzt, wechsel_takt)
+        if karte is None:
+            return None
+        payload = karte_payload(karte, cfg)
+        presence.update(payload)
+        return payload
 
     # Die Abo-Stufe steht im Nutzungsfenster ("Max (5x)") und wird von dort
     # uebernommen. plan_override greift, solange sie noch nie gesehen wurde.
@@ -1427,7 +1444,7 @@ def main():
                 beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None)
                 session_start = None
                 last_active = 0.0
-                if fremd_zeigen(now):
+                if anzeigen(now) is not None:
                     time.sleep(poll)
                     continue
                 presence.clear()
@@ -1460,7 +1477,7 @@ def main():
             if not show:
                 beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None)
                 session_start = None
-                if fremd_zeigen(now):
+                if anzeigen(now) is not None:
                     time.sleep(poll)
                     continue
                 presence.clear()
@@ -1494,7 +1511,6 @@ def main():
             # Erste Zeile ist die schnelle: was Claude in diesem Moment tut.
             # Ohne laufende Taetigkeit steht dort der Leerlauftext.
             details = act_text or open_pool[0]
-            payload = {"details": details, "start": session_start}
 
             # Zweite Zeile ist die langsame: Sitzung, Auslastung, Abo. Diese
             # drei aendern sich im Minutentakt, deshalb darf hier rotiert
@@ -1511,35 +1527,24 @@ def main():
             plan_text = limits.plan() or plan_override
             if plan_text:
                 state_parts.append(plan_template.replace("{plan}", plan_text))
-            if state_parts:
-                sl = cfg.get("state_line", {})
-                if sl.get("mode", "alternate") == "alternate" and len(state_parts) > 1:
-                    step = max(15, sl.get("alternate_seconds", 20))
-                    payload["state"] = state_parts[int(now / step) % len(state_parts)]
-                else:
-                    payload["state"] = " · ".join(state_parts)
-            if cfg.get("large_image_key"):
-                payload["large_image"] = cfg["large_image_key"]
-                payload["large_text"] = cfg.get("large_image_text", "Claude Desktop")
-            small_key = cfg.get(
-                "small_image_key_active" if currently_active else "small_image_key_open"
-            )
-            if small_key:
-                payload["small_image"] = small_key
-                payload["small_text"] = "Aktiv" if currently_active else "Inaktiv"
-            if cfg.get("buttons"):
-                payload["buttons"] = cfg["buttons"]
-            # Claude arbeitet -- aber vielleicht hat ein anderer Agent
-            # gerade juenger etwas getan. Der Rahmen gehoert genau einem.
+            # "working" nur, wenn Claude wirklich etwas tut. Ein offenes,
+            # fokussiertes Fenster ohne laufende Taetigkeit ist "waiting"
+            # -- sonst gaebe es nie einen ruhigen Moment, in dem die
+            # Anzeige zu Codex oder Antigravity weiterwandern kann.
             beacons.eigenen_schreiben(
                 DATA_DIR,
-                "working" if currently_active else "waiting",
+                "working" if (currently_active and act_text) else "waiting",
                 "thinking",
                 None,
                 session_start,
             )
-            if not fremd_zeigen(now):
-                presence.update(payload)
+            eigen = {
+                "details": details,
+                "zeilen": state_parts,
+                "start": session_start,
+                "aktiv": currently_active,
+            }
+            payload = anzeigen(now, eigen) or {}
             LAST_STATE.update({
                 "updated_at": int(now),
                 "details": payload.get("details"),

@@ -152,6 +152,81 @@ def rahmen_waehlen(eintraege):
     return None
 
 
+def arbeiter(eintraege):
+    """Wer arbeitet gerade wirklich? Dem gehoert die Anzeige allein.
+
+    "working" heisst: dieser Client tut in diesem Moment etwas. Wer nur
+    offen ist und wartet, zaehlt hier nicht -- sonst gaebe es nie einen
+    ruhigen Moment, in dem die Anzeige durch alle Clients wandern kann.
+    Arbeiten mehrere gleichzeitig, gewinnt der juengste Eintrag.
+    """
+    passend = [e for e in eintraege if e["state"] == "working"]
+    return max(passend, key=lambda e: e["updated_at"]) if passend else None
+
+
+def karten(eigen, fremde, cfg=None):
+    """Alle Anzeigen, zwischen denen im Ruhezustand gewechselt wird.
+
+    Eine Karte ist eine vollstaendige Anzeige: Zeile 1, Zeile 2 und die
+    Sitzung, zu der die Laufzeit gehoert. Ein Client mit drei Angaben in
+    Zeile 2 liefert drei Karten -- so wandert die Anzeige erst durch
+    seine eigenen Angaben und dann weiter zum naechsten Client.
+
+    Zeile 1 und Zeile 2 stammen immer vom selben Client. Ein Mischbild
+    aus der Taetigkeit des einen und dem Abo des anderen waere schlimmer
+    als gar keine Anzeige.
+
+    "eigen" ist der Daemon selbst und darf None sein (Claude laeuft
+    nicht) -- dann wandert die Anzeige nur durch die fremden Clients.
+    """
+    rotieren = (((cfg or {}).get("state_line") or {}).get("mode", "alternate")
+                == "alternate")
+
+    def zeilen_von(liste):
+        if not liste:
+            return [None]
+        if not rotieren:
+            return [" · ".join(liste)]
+        return liste
+
+    ergebnis = []
+    if eigen is not None:
+        for zeile in zeilen_von(eigen.get("zeilen")):
+            ergebnis.append({
+                "client": "claude",
+                "details": eigen["details"],
+                "zeile": zeile,
+                "start": eigen.get("start"),
+                "aktiv": bool(eigen.get("aktiv")),
+            })
+    for eintrag in sorted(fremde, key=lambda e: e["client"]):
+        for zeile in zeilen_von(zeilen_sitzung(eintrag, cfg)):
+            ergebnis.append({
+                "client": eintrag["client"],
+                "details": zeile_taetigkeit(eintrag),
+                "zeile": zeile,
+                "start": eintrag.get("session_start"),
+                "aktiv": eintrag["state"] == "working",
+            })
+    return ergebnis
+
+
+def karte_waehlen(liste, jetzt, schritt=20):
+    """Welche Karte gehoert zu diesem Zeitpunkt?
+
+    Die Untergrenze von 15 Sekunden ist keine Geschmacksfrage: Discord
+    leert die Presence, statt zu drosseln, wenn oefter aktualisiert wird
+    (discord-api-docs#668).
+    """
+    if not liste:
+        return None
+    try:
+        schritt = max(15, int(schritt))
+    except (TypeError, ValueError):
+        schritt = 20
+    return liste[int(jetzt / schritt) % len(liste)]
+
+
 def zeile_taetigkeit(eintrag):
     """Zeile 1: was dieser Client gerade tut.
 
