@@ -291,9 +291,15 @@ def main():
     # Instanzen laufen -- die Presence bleibt stumm, bis der letzte Prozess
     # weg ist. Deshalb wird die Sperre regelmaessig neu versucht: wer sie
     # bekommt, uebernimmt das Senden.
+    #
+    # Seit es den eigenstaendigen Dienst gibt, kommt ein zweiter Grund
+    # fuer die Rueckkehr hinzu: der Dienst hat Vorrang und die Extension
+    # weicht. Beide Faelle sehen von hier gleich aus -- warten und
+    # wieder anklopfen. Faellt der Dienst aus, uebernimmt die Extension
+    # binnen einer Minute von selbst.
     while True:
         try:
-            rpc.main()
+            rpc.main(rolle="extension")
         except Exception:
             traceback.print_exc(file=sys.stderr)
         time.sleep(UEBERNAHME_TAKT)

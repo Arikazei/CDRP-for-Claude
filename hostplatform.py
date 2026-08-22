@@ -182,6 +182,19 @@ if IS_WINDOWS:
         _INSTANCE_LOCK = handle
         return True
 
+    def release_instance():
+        """Sperre freigeben, ohne den Prozess zu beenden.
+
+        Gebraucht, seit der eigenstaendige Dienst Vorrang hat: die
+        Extension hoert auf zu senden und muss die Sperre abgeben,
+        sonst wartet der Dienst ewig auf ein Objekt, das niemand mehr
+        benutzt.
+        """
+        global _INSTANCE_LOCK
+        if _INSTANCE_LOCK:
+            kernel32.CloseHandle(_INSTANCE_LOCK)
+        _INSTANCE_LOCK = None
+
     def claude_config_dir():
         return Path(os.environ.get("APPDATA", "")) / "Claude"
 
@@ -263,6 +276,17 @@ else:
             return False
         _INSTANCE_LOCK = handle
         return True
+
+    def release_instance():
+        """Sperre freigeben, ohne den Prozess zu beenden. Siehe Windows."""
+        global _INSTANCE_LOCK
+        if _INSTANCE_LOCK is not None:
+            try:
+                fcntl.flock(_INSTANCE_LOCK, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            _INSTANCE_LOCK.close()
+        _INSTANCE_LOCK = None
 
     def claude_config_dir():
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")

@@ -90,16 +90,26 @@ def beacon_ordner(datenordner, systemweit=True):
     Gelesen wird deshalb, was erreichbar ist. Geschrieben wird weiterhin
     nur in den eigenen Ordner -- niemand soll fremde Ablagen anlegen.
     """
-    ordner = [Path(datenordner) / "beacons"]
+    return [ordner / "beacons"
+            for ordner in datenordner_kandidaten(datenordner, systemweit)]
+
+
+def datenordner_kandidaten(datenordner, systemweit=True):
+    """Alle Datenordner, die zu dieser Installation gehoeren koennen.
+
+    Der eigene zuerst. Alles Weitere ist der Store-Umleitung geschuldet
+    und faellt auf Linux weg.
+    """
+    ordner = [Path(datenordner)]
     if systemweit and os.name == "nt":
         profil = os.environ.get("USERPROFILE")
         if profil:
             lokal = Path(profil) / "AppData" / "Local"
-            ordner.append(lokal / "ClaudeDiscordPresence" / "beacons")
+            ordner.append(lokal / "ClaudeDiscordPresence")
             try:
                 for paket in sorted((lokal / "Packages").glob("Claude_*")):
                     ordner.append(paket / "LocalCache" / "Local"
-                                  / "ClaudeDiscordPresence" / "beacons")
+                                  / "ClaudeDiscordPresence")
             except OSError:
                 pass
     gesehen = set()
@@ -110,6 +120,77 @@ def beacon_ordner(datenordner, systemweit=True):
             gesehen.add(schluessel)
             eindeutig.append(pfad)
     return eindeutig
+
+
+# Wer sendet, wenn Dienst und Extension gleichzeitig laufen?
+#
+# Der Mutex allein entscheidet nach "wer war zuerst da". Bei einem
+# Autostart-Dienst und einem spaeter gestarteten Claude Desktop ist das
+# ein Zufallsergebnis, und wer gerade sendet, sieht man von aussen
+# nicht. Deshalb eine ausgesprochene Regel: der eigenstaendige Dienst
+# hat Vorrang, die Extension weicht.
+#
+# Angesagt wird das ueber einen Herzschlag. Faellt der Dienst aus,
+# uebernimmt die Extension nach einer Minute von selbst; startet er
+# spaeter, weicht sie binnen einer Minute zurueck. Niemand muss sich
+# eine Startreihenfolge merken.
+SENDER_DATEI = "sender.json"
+SENDER_FRISCH = 60
+ROLLEN_RANG = {"standalone": 2, "extension": 1}
+
+
+def sender_melden(datenordner, rolle, pid=None):
+    """Diesen Prozess als sendende Instanz eintragen."""
+    pfad = Path(datenordner) / SENDER_DATEI
+    daten = {
+        "rolle": rolle,
+        "pid": int(pid if pid is not None else os.getpid()),
+        "updated_at": int(time.time()),
+    }
+    try:
+        pfad.parent.mkdir(parents=True, exist_ok=True)
+        tmp = pfad.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(daten), encoding="utf-8")
+        os.replace(str(tmp), str(pfad))
+    except OSError as exc:
+        logging.warning("Senderkennung nicht schreibbar (%s)", exc)
+
+
+def sender_abmelden(datenordner):
+    """Eintrag entfernen, wenn dieser Prozess bewusst aufhoert."""
+    try:
+        (Path(datenordner) / SENDER_DATEI).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def fremder_sender(datenordner, eigene_rolle, eigene_pid=None,
+                   jetzt=None, systemweit=True):
+    """Sendet gerade ein hoeherrangiger Prozess? Dann dessen Eintrag.
+
+    Gesucht wird in allen Kandidatenordnern: der Dienst laeuft ausserhalb
+    des Store-Containers, die Extension darin, und beide halten ihren
+    eigenen Pfad fuer den einzigen.
+    """
+    jetzt = time.time() if jetzt is None else jetzt
+    eigene_pid = os.getpid() if eigene_pid is None else eigene_pid
+    eigener_rang = ROLLEN_RANG.get(eigene_rolle, 0)
+    for ordner in datenordner_kandidaten(datenordner, systemweit):
+        try:
+            roh = (ordner / SENDER_DATEI).read_text(encoding="utf-8")
+            daten = json.loads(roh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(daten, dict):
+            continue
+        zeit = daten.get("updated_at")
+        if not isinstance(zeit, int) or jetzt - zeit > SENDER_FRISCH:
+            continue
+        if daten.get("pid") == eigene_pid:
+            continue
+        if ROLLEN_RANG.get(daten.get("rolle"), 0) > eigener_rang:
+            return daten
+    return None
 
 
 def plan_saeubern(wert):

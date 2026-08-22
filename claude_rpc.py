@@ -25,6 +25,7 @@ import beacons
 from hostplatform import (
     DEFAULT_PROCESS_NAMES, accessibility_enable, claude_candidates,
     claude_config_dir, claude_focused, claude_running, idle_backend_name,
+    release_instance,
     idle_configure, idle_seconds, idle_supported, init_com, iter_processes,
     process_cmdline, process_path, single_instance, ui_tree_nodes,
     ui_tree_supported,
@@ -1299,10 +1300,26 @@ class RichPresence:
         self.last_payload = None
 
 
-def main():
+def main(rolle="extension"):
+    """Sendet die Presence, bis ein hoeherrangiger Prozess uebernimmt.
+
+    "rolle" entscheidet den Vorrang: "standalone" schlaegt "extension".
+    Der eigenstaendige Dienst laeuft unabhaengig von Claude Desktop und
+    kann deshalb auch dann senden, wenn nur Codex oder Antigravity
+    offen sind. Startet er, weicht die Extension und beantwortet nur
+    noch Werkzeugaufrufe; faellt er aus, uebernimmt sie wieder.
+
+    Rueckgabe ist True, wenn dieser Prozess wieder senden darf und der
+    Aufrufer es erneut versuchen soll.
+    """
     # Erst pruefen, dann den Mutex belegen. Andersherum haelt eine Instanz,
     # die gleich an der Konfiguration scheitert, die Sperre trotzdem fest
     # und legt damit auch die gesunde zweite Instanz lahm.
+    # Sofort anmelden, noch vor dem Mutex. Ein wartender Dienst muss
+    # sichtbar sein, sonst gibt die Extension die Sperre nie frei und
+    # beide warten aufeinander.
+    beacons.sender_melden(DATA_DIR, rolle)
+
     cfg = load_config()
     client_id = str(cfg.get("client_id", ""))
     if not client_id.isdigit():
@@ -1311,6 +1328,12 @@ def main():
             client_id[:40],
         )
         return
+
+    fremd = beacons.fremder_sender(DATA_DIR, rolle)
+    if fremd is not None:
+        logging.info("Es sendet bereits ein %s-Prozess (PID %s) - dieser "
+                     "Prozess wartet.", fremd.get("rolle"), fremd.get("pid"))
+        return True
 
     if not single_instance():
         # Nur beim ersten Mal ins Protokoll: der Aufrufer versucht die
@@ -1432,6 +1455,19 @@ def main():
     while True:
         now = time.time()
         try:
+            # Herzschlag und Vorrang. Erst melden, dann nachsehen: sonst
+            # sieht der andere in genau diesem Durchlauf nichts von uns.
+            beacons.sender_melden(DATA_DIR, rolle)
+            hoeher = beacons.fremder_sender(DATA_DIR, rolle, jetzt=now)
+            if hoeher is not None:
+                logging.info("Ein %s-Prozess (PID %s) uebernimmt - dieser "
+                             "Prozess hoert auf zu senden.",
+                             hoeher.get("rolle"), hoeher.get("pid"))
+                presence.clear()
+                beacons.sender_abmelden(DATA_DIR)
+                release_instance()
+                return True
+
             if is_paused():
                 presence.clear()
                 session_start = None

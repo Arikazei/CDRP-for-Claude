@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -198,6 +199,59 @@ class Zusatzfelder(unittest.TestCase):
         cfg = {"client_plans": {"codex": "von Hand"}}
         self.assertEqual(beacons.zeilen_sitzung(e, cfg),
                          ["Abonnement: Google AI Ultra"])
+
+
+class Vorrang(unittest.TestCase):
+    """Wer sendet, wenn Dienst und Extension gleichzeitig laufen?"""
+
+    def test_dienst_schlaegt_extension(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.sender_melden(d, "standalone", pid=4711)
+            fremd = beacons.fremder_sender(d, "extension", eigene_pid=99,
+                                           systemweit=False)
+            self.assertEqual(fremd["rolle"], "standalone")
+
+    def test_extension_verdraengt_den_dienst_nicht(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.sender_melden(d, "extension", pid=4711)
+            self.assertIsNone(beacons.fremder_sender(
+                d, "standalone", eigene_pid=99, systemweit=False))
+
+    def test_eigener_eintrag_zaehlt_nicht(self):
+        # Sonst wiche jeder Prozess vor sich selbst zurueck.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.sender_melden(d, "standalone", pid=4711)
+            self.assertIsNone(beacons.fremder_sender(
+                d, "standalone", eigene_pid=4711, systemweit=False))
+
+    def test_alter_eintrag_gilt_nicht(self):
+        # Der Dienst ist abgestuerzt: die Extension muss uebernehmen.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.sender_melden(d, "standalone", pid=4711)
+            spaeter = time.time() + beacons.SENDER_FRISCH + 1
+            self.assertIsNone(beacons.fremder_sender(
+                d, "extension", eigene_pid=99, jetzt=spaeter,
+                systemweit=False))
+
+    def test_abmelden_gibt_frei(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.sender_melden(d, "standalone", pid=4711)
+            beacons.sender_abmelden(d)
+            self.assertIsNone(beacons.fremder_sender(
+                d, "extension", eigene_pid=99, systemweit=False))
+
+    def test_kaputter_eintrag_blockiert_nicht(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / beacons.SENDER_DATEI).write_text("kein json",
+                                                  encoding="utf-8")
+            self.assertIsNone(beacons.fremder_sender(
+                d, "extension", eigene_pid=99, systemweit=False))
 
 
 class Karussell(unittest.TestCase):
