@@ -62,6 +62,12 @@ logging.basicConfig(
 # Instanz mit dem Mutex. Beantwortet eine andere den Werkzeugaufruf, setzt
 # sie sonst ihre eigene Variable, waehrend die sendende Instanz weiterlaeuft
 # -- presence_pause meldet dann Erfolg und in Discord aendert sich nichts.
+
+# Ein roher Modellbezeichner wird nur uebernommen, wenn er wie ein Name
+# aussieht. Claude Code traegt fuer eingefuegte Eintraege "<synthetic>"
+# ins Modellfeld ein, und das stand danach woertlich in der Presence.
+RE_MODELL_ROH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,39}$")
+
 PAUSE_PATH = DATA_DIR / "paused.flag"
 _PAUSED = PAUSE_PATH.exists()
 _PAUSED_GEPRUEFT = 0.0
@@ -233,8 +239,17 @@ class SessionInfo:
                         model = fam.capitalize() + " " + major
                         if minor:
                             model += "." + minor
-                    else:
+                    elif RE_MODELL_ROH.match(mid):
+                        # Unbekannter, aber plausibler Name: uebernehmen,
+                        # damit ein neues Modell nicht erst ein Update
+                        # braucht, um angezeigt zu werden.
                         model = mid
+                    # Sonst weitersuchen. Claude Code schreibt fuer
+                    # eingefuegte Eintraege "<synthetic>" ins Modellfeld;
+                    # das stand danach woertlich in der Presence
+                    # ("using code with <synthetic>", am 22.08.2026
+                    # gesehen). Ein Name in spitzen Klammern ist kein
+                    # Modell, sondern eine Markierung.
             if project and model:
                 break
         return project, model
@@ -1548,6 +1563,14 @@ def main(rolle="extension"):
                 or beacon.get(activity_fresh=bool(act_text))
             )
 
+            # Eine erkannte Taetigkeit gilt als Aktivitaet, auch ohne
+            # Tastendruck. Sonst blendet der Leerlauf-Zeitgeber die
+            # Presence mitten in einem langen, unbeaufsichtigten Lauf
+            # aus: "Presence ausblenden nach X Minuten" meint, dass
+            # nichts passiert -- nicht, dass niemand hinsieht.
+            if act_text:
+                last_active = now
+
             # Erste Zeile ist die schnelle: was Claude in diesem Moment tut.
             # Ohne laufende Taetigkeit steht dort der Leerlauftext.
             details = act_text or open_pool[0]
@@ -1567,13 +1590,22 @@ def main(rolle="extension"):
             plan_text = limits.plan() or plan_override
             if plan_text:
                 state_parts.append(plan_template.replace("{plan}", plan_text))
-            # "working" nur, wenn Claude wirklich etwas tut. Ein offenes,
-            # fokussiertes Fenster ohne laufende Taetigkeit ist "waiting"
-            # -- sonst gaebe es nie einen ruhigen Moment, in dem die
-            # Anzeige zu Codex oder Antigravity weiterwandern kann.
+            # "working" haengt allein an der erkannten Taetigkeit, nicht
+            # am Fensterfokus.
+            #
+            # Vorher stand hier "currently_active and act_text", und
+            # currently_active heisst: das Claude-Fenster ist im
+            # Vordergrund UND es gab kuerzlich eine Eingabe. Wer einen
+            # Agenten laufen laesst und derweil in Codex oder im Browser
+            # arbeitet, erfuellt das nicht -- Claude meldete sich als
+            # "waiting", obwohl es arbeitete. Am 22.08.2026 gemessen:
+            # activity "Denkt nach", zugleich active=false, Beacon
+            # "waiting", und die Presence wanderte durch die ruhenden
+            # Apps. Fokus sagt etwas darueber, wo der Nutzer hinsieht,
+            # nichts darueber, ob der Agent arbeitet.
             beacons.eigenen_schreiben(
                 DATA_DIR,
-                "working" if (currently_active and act_text) else "waiting",
+                "working" if act_text else "waiting",
                 "thinking",
                 None,
                 session_start,
@@ -1582,7 +1614,9 @@ def main(rolle="extension"):
                 "details": details,
                 "zeilen": state_parts,
                 "start": session_start,
-                "aktiv": currently_active,
+                # Das kleine Abzeichen zeigt "es passiert etwas", nicht
+                # "der Nutzer sitzt davor".
+                "aktiv": bool(act_text) or currently_active,
             }
             payload = anzeigen(now, eigen) or {}
             LAST_STATE.update({
