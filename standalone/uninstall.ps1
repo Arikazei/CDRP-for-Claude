@@ -15,7 +15,13 @@ if (Test-Path $vbs) {
     Write-Host "Kein Autostart-Eintrag gefunden."
 }
 
-$laeuft = Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" |
+# Nach der Befehlszeile suchen, nicht nach dem Prozessnamen. Der Name
+# ist nicht verlaesslich: die Store-Fassung von Python meldet sich als
+# "pythonw3.12.exe", eine Verknuepfung im Autostart kann anders heissen.
+# Genau daran ist am 22.08.2026 eine alte Instanz uebersehen worden --
+# sie hielt den Mutex, und die Presence blieb stumm, waehrend im
+# Protokoll nur "laeuft bereits" stand.
+$laeuft = Get-CimInstance Win32_Process |
     Where-Object { $_.CommandLine -like "*run_presence.py*" }
 foreach ($p in $laeuft) {
     Stop-Process -Id $p.ProcessId -Force

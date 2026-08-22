@@ -296,16 +296,39 @@ def rahmen_waehlen(eintraege):
     return None
 
 
-def arbeiter(eintraege):
+def arbeiter(eintraege, bisheriger=None):
     """Wer arbeitet gerade wirklich? Dem gehoert die Anzeige allein.
 
     "working" heisst: dieser Client tut in diesem Moment etwas. Wer nur
     offen ist und wartet, zaehlt hier nicht -- sonst gaebe es nie einen
     ruhigen Moment, in dem die Anzeige durch alle Clients wandern kann.
-    Arbeiten mehrere gleichzeitig, gewinnt der juengste Eintrag.
+
+    "bisheriger" ist der Client, dem der Rahmen im letzten Durchlauf
+    gehoerte. Arbeitet er weiter, behaelt er ihn. Das ist keine
+    Bequemlichkeit, sondern behebt einen Fehler:
+
+    Vorher gewann schlicht der juengste Eintrag. Die Clients schreiben
+    aber unterschiedlich oft. Claude erneuert sich alle fuenf Sekunden,
+    Codex nur bei Hook-Ereignissen -- also ein paar Mal je Aufgabe. Nach
+    jedem Codex-Ereignis war Claudes Zeitstempel Sekundenbruchteile
+    spaeter wieder der juengste und holte sich den Rahmen zurueck.
+    Codex war damit praktisch unsichtbar, obwohl sein Beacon korrekt
+    "working" meldete. Am 22.08.2026 gemessen: Hook feuerte fuenfmal in
+    zehn Sekunden, in der Presence stand durchgehend Claude.
+
+    Mit dem Vorrang des bisherigen Besitzers zaehlt nicht mehr, wer
+    zuletzt geschrieben hat, sondern wer angefangen hat und noch dabei
+    ist. Der Verfall (working -> waiting nach STALE) beendet das von
+    selbst, wenn wirklich niemand mehr etwas tut.
     """
     passend = [e for e in eintraege if e["state"] == "working"]
-    return max(passend, key=lambda e: e["updated_at"]) if passend else None
+    if not passend:
+        return None
+    if bisheriger:
+        for eintrag in passend:
+            if eintrag["client"] == bisheriger:
+                return eintrag
+    return max(passend, key=lambda e: e["updated_at"])
 
 
 def karten(eigen, fremde, cfg=None):

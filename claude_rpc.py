@@ -1407,6 +1407,9 @@ def main(rolle="extension"):
     pool = beacons.Pool(DATA_DIR)
 
     wechsel_takt = (cfg.get("state_line") or {}).get("alternate_seconds", 20)
+    # Wem der Rahmen zuletzt gehoerte. Als Woerterbuch, weil die
+    # Closure ihn schreiben muss und "nonlocal" hier nur Laerm waere.
+    besitzer = {"client": None}
 
     def anzeigen(jetzt, eigen=None):
         """Waehlt aus, wer gerade zu sehen ist, und sendet ihn.
@@ -1414,9 +1417,10 @@ def main(rolle="extension"):
         Zwei Regeln, mehr nicht:
 
         Erstens -- arbeitet gerade jemand wirklich, gehoert ihm die
-        Anzeige allein, und zwar dem juengsten. Wer tippt, will nicht
-        alle zwanzig Sekunden von einem ruhenden Nachbarn verdraengt
-        werden.
+        Anzeige allein. Wer tippt, will nicht alle zwanzig Sekunden von
+        einem ruhenden Nachbarn verdraengt werden. Wer angefangen hat,
+        behaelt den Rahmen, solange er arbeitet; sonst gewaenne staendig
+        der Client, der am haeufigsten schreibt (siehe beacons.arbeiter).
 
         Zweitens -- arbeitet niemand, wandert die Anzeige der Reihe nach
         durch alle offenen Clients und dort durch alles, was ueber sie
@@ -1426,7 +1430,8 @@ def main(rolle="extension"):
         Rueckgabe ist die gesendete Nutzlast oder None.
         """
         eintraege = pool.lesen(jetzt)
-        chef = beacons.arbeiter(eintraege)
+        chef = beacons.arbeiter(eintraege, besitzer.get("client"))
+        besitzer["client"] = chef["client"] if chef else None
         if chef is None:
             liste = beacons.karten(
                 eigen, [e for e in eintraege if e["client"] != "claude"], cfg)

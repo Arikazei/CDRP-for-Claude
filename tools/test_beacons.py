@@ -270,6 +270,27 @@ class Karussell(unittest.TestCase):
         b = eintrag(client="antigravity", state="working", updated_at=200)
         self.assertEqual(beacons.arbeiter([a, b])["client"], "antigravity")
 
+    def test_besitzer_behaelt_den_rahmen(self):
+        # Der Kern des Fehlers vom 22.08.: Claude schreibt alle 5 s,
+        # Codex nur bei Hook-Ereignissen. Ohne Vorrang des Besitzers
+        # holte sich Claude den Rahmen nach jedem Codex-Ereignis sofort
+        # zurueck, und Codex war nie zu sehen.
+        codex = eintrag(client="codex", state="working", updated_at=100)
+        claude = eintrag(client="claude", state="working", updated_at=999)
+        self.assertEqual(
+            beacons.arbeiter([codex, claude], "codex")["client"], "codex")
+
+    def test_besitzer_verliert_wenn_er_aufhoert(self):
+        codex = eintrag(client="codex", state="waiting", updated_at=999)
+        claude = eintrag(client="claude", state="working", updated_at=100)
+        self.assertEqual(
+            beacons.arbeiter([codex, claude], "codex")["client"], "claude")
+
+    def test_unbekannter_besitzer_stoert_nicht(self):
+        claude = eintrag(client="claude", state="working", updated_at=100)
+        self.assertEqual(
+            beacons.arbeiter([claude], "weg")["client"], "claude")
+
     def test_volle_runde_durch_alle_clients(self):
         fremde = [
             eintrag(client="codex", display_name="OpenAI Codex",

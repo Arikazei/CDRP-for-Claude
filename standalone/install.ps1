@@ -75,9 +75,18 @@ Write-Host "Autostart eingerichtet:" $vbs
 Write-Host "Laufzeit:" $runtime
 
 # Gleich starten, damit man nicht erst neu anmelden muss.
+# Erst aufraeumen: eine alte Instanz haelt sonst den Mutex, und der
+# neue Dienst startet, sendet aber nie. Gesucht wird nach der
+# Befehlszeile, nicht nach dem Prozessnamen -- der ist nicht
+# verlaesslich (die Store-Fassung heisst "pythonw3.12.exe").
+Get-CimInstance Win32_Process |
+    Where-Object { $_.CommandLine -like "*run_presence.py*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+
 Start-Process -FilePath "wscript.exe" -ArgumentList "`"$vbs`""
-Start-Sleep -Seconds 3
-$laeuft = Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" |
+Start-Sleep -Seconds 5
+$laeuft = Get-CimInstance Win32_Process |
     Where-Object { $_.CommandLine -like "*run_presence.py*" }
 if ($laeuft) {
     Write-Host "Dienst laeuft, PID" $laeuft.ProcessId

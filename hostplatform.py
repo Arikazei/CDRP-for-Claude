@@ -174,6 +174,24 @@ if IS_WINDOWS:
         bliebe bis zum letzten Prozessende stumm.
         """
         global _INSTANCE_LOCK
+        # SetLastError(0) ist hier Pflicht, nicht Vorsicht.
+        #
+        # CreateMutexW setzt ERROR_ALREADY_EXISTS, wenn das Objekt schon
+        # da war. Gelingt der Aufruf mit einem NEUEN Objekt, laesst die
+        # Funktion den letzten Fehlercode des Fadens dagegen unberuehrt
+        # -- was immer vorher darin stand, steht danach noch drin.
+        #
+        # Genau das ist am 22.08.2026 passiert: unmittelbar davor lief
+        # beacons.sender_melden(), und dessen mkdir(exist_ok=True) endet
+        # auf einem vorhandenen Ordner mit CreateDirectory ->
+        # ERROR_ALREADY_EXISTS (183). Der frisch erzeugte Mutex sah
+        # damit aus wie ein bereits belegter. Der Dienst hielt sich fuer
+        # die zweite Instanz, sendete nie, und die Extension trat
+        # gleichzeitig zurueck, weil der Dienst sich ordentlich
+        # angemeldet hatte. Niemand sendete mehr, und im Protokoll stand
+        # nur "laeuft bereits" -- eine Meldung, die man dreimal liest,
+        # bevor man ihr misstraut.
+        kernel32.SetLastError(0)
         handle = kernel32.CreateMutexW(None, False, "Local\\" + name)
         if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
             if handle:
