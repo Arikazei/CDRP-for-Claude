@@ -306,6 +306,28 @@ def zeile_taetigkeit(eintrag):
     return "%s · %s" % (eintrag["display_name"], text)
 
 
+VENDOR_PRAEFIXE = ("Google ", "OpenAI ", "Anthropic ", "Microsoft ", "Meta ")
+
+
+def kurzname(eintrag):
+    """Der Produktname ohne Hersteller.
+
+    Zeile 1 nennt den Client bereits vollstaendig -- "Google
+    Antigravity". Zeile 2 direkt darunter noch einmal mit "using Google
+    Antigravity with ..." zu beginnen, verbraucht die halbe Zeile fuer
+    eine Angabe, die eine Zeile hoeher schon steht. Also nur "using
+    Antigravity with Gemini 3.7 Flash High".
+
+    Bleibt nach dem Kuerzen nichts uebrig, gilt der volle Name: ein
+    Client, der schlicht "Google" hiesse, soll nicht namenlos werden.
+    """
+    name = eintrag.get("display_name") or eintrag.get("client") or ""
+    for praefix in VENDOR_PRAEFIXE:
+        if name.startswith(praefix) and len(name) > len(praefix):
+            return name[len(praefix):]
+    return name
+
+
 def zeilen_sitzung(eintrag, cfg=None):
     """Zeile 2 als Liste: alles, was ueber diesen Client bekannt ist.
 
@@ -322,7 +344,7 @@ def zeilen_sitzung(eintrag, cfg=None):
     teile = []
     if eintrag.get("model"):
         teile.append("using %s with %s"
-                     % (eintrag["display_name"], eintrag["model"]))
+                     % (kurzname(eintrag), eintrag["model"]))
 
     # Auslastung. Beschriftet wie bei Claude, damit in derselben Zeile
     # nicht zwei Sprachen stehen.

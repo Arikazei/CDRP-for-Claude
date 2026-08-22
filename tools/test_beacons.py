@@ -120,6 +120,24 @@ class Texte(unittest.TestCase):
         teile = beacons.zeilen_sitzung(eintrag(), cfg)
         self.assertEqual(teile[-1], "Abonnement: ChatGPT Plus")
 
+    def test_hersteller_faellt_in_zeile_zwei_weg(self):
+        # Zeile 1 nennt "Google Antigravity" bereits vollstaendig.
+        e = eintrag(client="antigravity", display_name="Google Antigravity",
+                    model="Gemini 3.7 Flash High")
+        self.assertEqual(beacons.zeilen_sitzung(e)[0],
+                         "using Antigravity with Gemini 3.7 Flash High")
+
+    def test_name_ohne_hersteller_bleibt_ganz(self):
+        e = eintrag(client="claude", display_name="Claude Desktop",
+                    model="Opus")
+        self.assertEqual(beacons.zeilen_sitzung(e)[0],
+                         "using Claude Desktop with Opus")
+
+    def test_reiner_herstellername_bleibt_stehen(self):
+        e = eintrag(client="x", display_name="Google", model="Gemini")
+        self.assertEqual(beacons.zeilen_sitzung(e)[0],
+                         "using Google with Gemini")
+
     def test_abo_eines_anderen_clients_greift_nicht(self):
         cfg = {"client_plans": {"antigravity": "Google AI Pro"}}
         teile = beacons.zeilen_sitzung(eintrag(model=None), cfg)
@@ -214,7 +232,7 @@ class Karussell(unittest.TestCase):
         self.assertIsNone(liste[3]["zeile"])
         self.assertEqual(liste[4]["details"], "OpenAI Codex")
         self.assertEqual(liste[4]["zeile"],
-                         "using OpenAI Codex with GPT-5.6 Sol")
+                         "using Codex with GPT-5.6 Sol")
 
     def test_ohne_eigenen_nur_fremde(self):
         fremde = [eintrag(client="codex", state="idle", action="idle",
