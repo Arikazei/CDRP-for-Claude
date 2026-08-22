@@ -296,39 +296,35 @@ def rahmen_waehlen(eintraege):
     return None
 
 
-def arbeiter(eintraege, bisheriger=None):
-    """Wer arbeitet gerade wirklich? Dem gehoert die Anzeige allein.
+def aktive(eintraege):
+    """Alle Clients, die gerade wirklich etwas tun -- in fester Ordnung.
 
-    "working" heisst: dieser Client tut in diesem Moment etwas. Wer nur
-    offen ist und wartet, zaehlt hier nicht -- sonst gaebe es nie einen
-    ruhigen Moment, in dem die Anzeige durch alle Clients wandern kann.
+    Zwei Anlaeufe waren vorher falsch, und beide aus demselben Grund:
+    sie suchten EINEN Gewinner.
 
-    "bisheriger" ist der Client, dem der Rahmen im letzten Durchlauf
-    gehoerte. Arbeitet er weiter, behaelt er ihn. Das ist keine
-    Bequemlichkeit, sondern behebt einen Fehler:
+    Der erste nahm den juengsten "working"-Eintrag. Die Clients
+    schreiben aber unterschiedlich oft -- Claude alle fuenf Sekunden,
+    Codex nur bei Hook-Ereignissen. Nach jedem Codex-Ereignis war
+    Claudes Zeitstempel Sekundenbruchteile spaeter wieder der juengste.
+    Es gewann nicht, wer arbeitet, sondern wer am oeftesten schreibt.
 
-    Vorher gewann schlicht der juengste Eintrag. Die Clients schreiben
-    aber unterschiedlich oft. Claude erneuert sich alle fuenf Sekunden,
-    Codex nur bei Hook-Ereignissen -- also ein paar Mal je Aufgabe. Nach
-    jedem Codex-Ereignis war Claudes Zeitstempel Sekundenbruchteile
-    spaeter wieder der juengste und holte sich den Rahmen zurueck.
-    Codex war damit praktisch unsichtbar, obwohl sein Beacon korrekt
-    "working" meldete. Am 22.08.2026 gemessen: Hook feuerte fuenfmal in
-    zehn Sekunden, in der Presence stand durchgehend Claude.
+    Der zweite gab dem bisherigen Besitzer Vorrang. Damit hielt Claude
+    den Rahmen fest, solange irgendeine Taetigkeit erkannt wurde -- und
+    das ist waehrend einer Cowork-Sitzung durchgehend der Fall. Codex
+    arbeitete daneben zweieinhalb Minuten und kam nie vor.
 
-    Mit dem Vorrang des bisherigen Besitzers zaehlt nicht mehr, wer
-    zuletzt geschrieben hat, sondern wer angefangen hat und noch dabei
-    ist. Der Verfall (working -> waiting nach STALE) beendet das von
-    selbst, wenn wirklich niemand mehr etwas tut.
+    Arbeiten mehrere gleichzeitig, ist die ehrliche Anzeige nicht "einer
+    von beiden", sondern beide nacheinander. Wer nur offen ist und
+    wartet, bleibt draussen -- ein ruhender Nachbar soll niemanden
+    verdraengen, der tippt.
+
+    Sortiert nach Client-Namen, damit die Reihenfolge nicht bei jedem
+    Durchlauf springt: der Wechsel haengt an der Uhrzeit, und eine
+    wechselnde Reihenfolge liesse die Anzeige zufaellig hin und her
+    hopsen.
     """
-    passend = [e for e in eintraege if e["state"] == "working"]
-    if not passend:
-        return None
-    if bisheriger:
-        for eintrag in passend:
-            if eintrag["client"] == bisheriger:
-                return eintrag
-    return max(passend, key=lambda e: e["updated_at"])
+    return sorted((e for e in eintraege if e["state"] == "working"),
+                  key=lambda e: e["client"])
 
 
 def karten(eigen, fremde, cfg=None):

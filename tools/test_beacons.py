@@ -260,36 +260,34 @@ class Karussell(unittest.TestCase):
              "zeilen": ["using cowork with Opus", "5h: 40%",
                         "Abonnement: Max (5x)"]}
 
-    def test_arbeiter_nur_bei_working(self):
+    def test_nur_working_zaehlt_als_aktiv(self):
         a = eintrag(client="codex", state="waiting", updated_at=9999)
         b = eintrag(client="antigravity", state="idle", action="idle")
-        self.assertIsNone(beacons.arbeiter([a, b]))
+        self.assertEqual(beacons.aktive([a, b]), [])
 
-    def test_arbeiter_juengster_gewinnt(self):
-        a = eintrag(client="codex", state="working", updated_at=100)
-        b = eintrag(client="antigravity", state="working", updated_at=200)
-        self.assertEqual(beacons.arbeiter([a, b])["client"], "antigravity")
-
-    def test_besitzer_behaelt_den_rahmen(self):
-        # Der Kern des Fehlers vom 22.08.: Claude schreibt alle 5 s,
-        # Codex nur bei Hook-Ereignissen. Ohne Vorrang des Besitzers
-        # holte sich Claude den Rahmen nach jedem Codex-Ereignis sofort
-        # zurueck, und Codex war nie zu sehen.
+    def test_mehrere_arbeitende_kommen_alle_dran(self):
+        # Der Kern der Fehler vom 22.08.: erst gewann der haeufigste
+        # Schreiber, dann der bisherige Besitzer. Beide Male war Codex
+        # nie zu sehen, obwohl er arbeitete. Jetzt sind beide dabei.
         codex = eintrag(client="codex", state="working", updated_at=100)
         claude = eintrag(client="claude", state="working", updated_at=999)
-        self.assertEqual(
-            beacons.arbeiter([codex, claude], "codex")["client"], "codex")
+        self.assertEqual([e["client"] for e in beacons.aktive([codex, claude])],
+                         ["claude", "codex"])
 
-    def test_besitzer_verliert_wenn_er_aufhoert(self):
-        codex = eintrag(client="codex", state="waiting", updated_at=999)
-        claude = eintrag(client="claude", state="working", updated_at=100)
-        self.assertEqual(
-            beacons.arbeiter([codex, claude], "codex")["client"], "claude")
+    def test_reihenfolge_haengt_nicht_am_zeitstempel(self):
+        # Sonst huepfte die Anzeige zufaellig, weil der Wechsel an der
+        # Uhrzeit haengt und die Liste sich staendig umsortieren wuerde.
+        a = eintrag(client="codex", state="working", updated_at=999)
+        b = eintrag(client="antigravity", state="working", updated_at=1)
+        self.assertEqual([e["client"] for e in beacons.aktive([a, b])],
+                         ["antigravity", "codex"])
 
-    def test_unbekannter_besitzer_stoert_nicht(self):
-        claude = eintrag(client="claude", state="working", updated_at=100)
-        self.assertEqual(
-            beacons.arbeiter([claude], "weg")["client"], "claude")
+    def test_wartender_verdraengt_keinen_arbeitenden(self):
+        wartend = eintrag(client="antigravity", state="waiting",
+                          updated_at=9999)
+        arbeitend = eintrag(client="codex", state="working", updated_at=1)
+        self.assertEqual([e["client"] for e in beacons.aktive([wartend, arbeitend])],
+                         ["codex"])
 
     def test_volle_runde_durch_alle_clients(self):
         fremde = [

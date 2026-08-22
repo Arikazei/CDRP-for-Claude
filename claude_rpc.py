@@ -1407,20 +1407,15 @@ def main(rolle="extension"):
     pool = beacons.Pool(DATA_DIR)
 
     wechsel_takt = (cfg.get("state_line") or {}).get("alternate_seconds", 20)
-    # Wem der Rahmen zuletzt gehoerte. Als Woerterbuch, weil die
-    # Closure ihn schreiben muss und "nonlocal" hier nur Laerm waere.
-    besitzer = {"client": None}
 
     def anzeigen(jetzt, eigen=None):
         """Waehlt aus, wer gerade zu sehen ist, und sendet ihn.
 
         Zwei Regeln, mehr nicht:
 
-        Erstens -- arbeitet gerade jemand wirklich, gehoert ihm die
-        Anzeige allein. Wer tippt, will nicht alle zwanzig Sekunden von
-        einem ruhenden Nachbarn verdraengt werden. Wer angefangen hat,
-        behaelt den Rahmen, solange er arbeitet; sonst gewaenne staendig
-        der Client, der am haeufigsten schreibt (siehe beacons.arbeiter).
+        Erstens -- arbeitet mindestens einer wirklich, sind nur die
+        Arbeitenden zu sehen, und zwar nacheinander. Wer bloss offen ist
+        und wartet, bleibt draussen und verdraengt niemanden, der tippt.
 
         Zweitens -- arbeitet niemand, wandert die Anzeige der Reihe nach
         durch alle offenen Clients und dort durch alles, was ueber sie
@@ -1430,15 +1425,19 @@ def main(rolle="extension"):
         Rueckgabe ist die gesendete Nutzlast oder None.
         """
         eintraege = pool.lesen(jetzt)
-        chef = beacons.arbeiter(eintraege, besitzer.get("client"))
-        besitzer["client"] = chef["client"] if chef else None
-        if chef is None:
+        arbeitend = beacons.aktive(eintraege)
+        if arbeitend:
+            # Nur die, die wirklich arbeiten. Sind es mehrere, kommen
+            # sie nacheinander dran statt dass einer den anderen
+            # dauerhaft verdeckt.
+            eigen_dabei = any(e["client"] == "claude" for e in arbeitend)
+            liste = beacons.karten(
+                eigen if eigen_dabei else None,
+                [e for e in arbeitend if e["client"] != "claude"], cfg)
+        else:
+            # Niemand arbeitet: die volle Runde durch alles, was offen ist.
             liste = beacons.karten(
                 eigen, [e for e in eintraege if e["client"] != "claude"], cfg)
-        elif chef["client"] == "claude":
-            liste = beacons.karten(eigen, [], cfg)
-        else:
-            liste = beacons.karten(None, [chef], cfg)
         karte = beacons.karte_waehlen(liste, jetzt, wechsel_takt)
         if karte is None:
             return None
