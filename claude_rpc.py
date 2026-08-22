@@ -1385,6 +1385,9 @@ def main(rolle="extension"):
     active_threshold = cfg.get("active_input_threshold_seconds", 90)
     poll = cfg.get("poll_interval_seconds", 5)
     open_pool = (cfg.get("texts", {}).get("open")) or ["Claude Desktop"]
+    # Der Name, unter dem dieser Client auftritt -- in Zeile 1 und im
+    # eigenen Beacon. Eine Quelle, damit beide nicht auseinanderlaufen.
+    eigener_name = (cfg.get("display_name") or "").strip() or beacons.EIGENER_NAME
 
     # Erst die Schwelle anmelden, dann messen: unter Wayland liefert der
     # Compositor keine Leerlaufzeit, sondern meldet nur das Ueberschreiten
@@ -1496,7 +1499,8 @@ def main(rolle="extension"):
             if not claude_running(process_names):
                 # Claude ist weg, aber Codex oder Antigravity arbeiten
                 # vielleicht weiter. Erst danach wirklich abschalten.
-                beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None)
+                beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None,
+                                          display_name=eigener_name)
                 session_start = None
                 last_active = 0.0
                 if anzeigen(now) is not None:
@@ -1530,7 +1534,8 @@ def main(rolle="extension"):
 
             show = bool(last_active) and (now - last_active) <= idle_timeout
             if not show:
-                beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None)
+                beacons.eigenen_schreiben(DATA_DIR, "idle", "idle", None, None,
+                                          display_name=eigener_name)
                 session_start = None
                 if anzeigen(now) is not None:
                     time.sleep(poll)
@@ -1571,9 +1576,18 @@ def main(rolle="extension"):
             if act_text:
                 last_active = now
 
-            # Erste Zeile ist die schnelle: was Claude in diesem Moment tut.
-            # Ohne laufende Taetigkeit steht dort der Leerlauftext.
-            details = act_text or open_pool[0]
+            # Erste Zeile ist die schnelle: was Claude in diesem Moment
+            # tut -- mit dem Namen davor, wie bei allen anderen Clients
+            # auch. Seit sich drei Agenten eine Presence teilen, ist
+            # "Denkt nach" allein nicht mehr beantwortbar: wer denkt
+            # nach? Also "Claude Desktop · Denkt nach", genau wie
+            # "Google Antigravity · editing a file".
+            #
+            # Ohne laufende Taetigkeit steht dort nur der Leerlauftext,
+            # ebenfalls wie bei den anderen: im Ruhezustand nennt Zeile
+            # 1 den Namen und sonst nichts.
+            details = ("%s · %s" % (eigener_name, act_text) if act_text
+                       else open_pool[0])
 
             # Zweite Zeile ist die langsame: Sitzung, Auslastung, Abo. Diese
             # drei aendern sich im Minutentakt, deshalb darf hier rotiert
@@ -1609,6 +1623,7 @@ def main(rolle="extension"):
                 "thinking",
                 None,
                 session_start,
+                display_name=eigener_name,
             )
             eigen = {
                 "details": details,

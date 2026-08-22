@@ -112,6 +112,24 @@ class Texte(unittest.TestCase):
     def test_sitzung_ohne_modell(self):
         self.assertIsNone(beacons.zeile_sitzung(eintrag(model=None)))
 
+    def test_eigener_name_ist_einstellbar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.eigenen_schreiben(d, "working", "thinking", None, 1,
+                                      display_name="Claude auf dem Turm")
+            daten = json.loads(
+                (d / "beacons" / "claude.json").read_text(encoding="utf-8"))
+            self.assertEqual(daten["display_name"], "Claude auf dem Turm")
+
+    def test_leerer_name_faellt_auf_die_vorgabe_zurueck(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            beacons.eigenen_schreiben(d, "working", "thinking", None, 1,
+                                      display_name="")
+            daten = json.loads(
+                (d / "beacons" / "claude.json").read_text(encoding="utf-8"))
+            self.assertEqual(daten["display_name"], beacons.EIGENER_NAME)
+
     def test_leerlauf_zeigt_nur_den_namen(self):
         e = eintrag(state="idle", action="idle", file_kind=None)
         self.assertEqual(beacons.zeile_taetigkeit(e), "OpenAI Codex")

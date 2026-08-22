@@ -538,8 +538,11 @@ class Pool:
         return geprueft
 
 
+EIGENER_NAME = "Claude Desktop"
+
+
 def eigenen_schreiben(datenordner, state, action, model, session_start,
-                      file_kind=None):
+                      file_kind=None, display_name=EIGENER_NAME):
     """Der Daemon meldet sich selbst als Produzent.
 
     Er koennte seinen Zustand auch direkt in den Rahmenwaehler reichen.
@@ -552,7 +555,7 @@ def eigenen_schreiben(datenordner, state, action, model, session_start,
     daten = {
         "v": 1,
         "client": "claude",
-        "display_name": "Claude Desktop",
+        "display_name": display_name or EIGENER_NAME,
         "state": state,
         "action": action,
         "model": model,
