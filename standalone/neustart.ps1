@@ -23,6 +23,20 @@ foreach ($p in Finde) {
     Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
 }
 
+# Auch die Extension beenden. Claude Desktop startet sie von selbst neu,
+# dann mit den aktuellen Dateien.
+#
+# Ohne das bleibt beim Entwickeln eine Instanz mit altem Code im
+# Speicher liegen: Python liest die Datei einmal beim Start. Am
+# 23.08.2026 hat genau so ein Prozess vom Vorabend den Mutex gehalten
+# und weitergesendet, waehrend der frisch gestartete Dienst danebenstand
+# und wartete. Sichtbar war das nur daran, dass in der Presence
+# Formulierungen standen, die es im aktuellen Stand nicht mehr gab.
+foreach ($p in Get-Process ClaudeDiscordPresence -ErrorAction SilentlyContinue) {
+    Write-Host ("beende {0,6} {1} (Extension)" -f $p.Id, $p.ProcessName)
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+}
+
 Start-Sleep -Seconds 4
 foreach ($v in @("DiscordPresence-Dienst.vbs", "DiscordRP-Antigravity.vbs",
                  "DiscordRP-Codex.vbs")) {
