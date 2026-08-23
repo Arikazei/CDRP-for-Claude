@@ -83,6 +83,7 @@
     "refresh_seconds": 15,
     "max_age_minutes": 30,
     "show_model": true,
+    "show_effort": true,
     "label": "using cowork"
   },
   "local_usage": {

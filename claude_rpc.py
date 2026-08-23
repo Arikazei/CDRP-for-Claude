@@ -1086,6 +1086,48 @@ class ToolHistoryWatcher:
         return None
 
 
+RE_STUFE = re.compile(r"^[a-z][a-z0-9_-]{0,15}$")
+
+
+def stufe_text(daten):
+    """Denkstufe einer Sitzung als Anzeigetext, oder None.
+
+    Am 23.08.2026 ueber alle sechs Menueeintraege gemessen:
+
+        niedrig   effort=low       ultracode nie gesetzt
+        mittel    effort=medium    ultracode=false
+        hoch      effort=high      ultracode=false
+        extra     effort=xhigh     ultracode=false
+        max       effort=max       ultracode=false
+        ultracode effort=xhigh     ultracode=true
+
+    Zwei Dinge, die man daran nicht raten darf:
+
+    ultracode ist KEINE Denkstufe. Es sitzt zwar im selben Menue, setzt
+    den Aufwand aber von max sogar auf xhigh zurueck und schaltet
+    stattdessen ein eigenes Merkmal ein. Deshalb wird es angehaengt und
+    nicht als Stufe ausgegeben -- sonst waeren "extra" und "ultracode"
+    in der Anzeige nicht zu unterscheiden, beide sind xhigh.
+
+    Und "nie gesetzt" ist dasselbe wie "aus": bei der ersten Stufe stand
+    sessionSettings noch auf null, danach ueberall auf false. Wer null
+    anders behandelt als false, zeigt bei einer frischen Sitzung etwas
+    anderes als bei einer benutzten.
+
+    Angezeigt werden die internen Namen. Die Uebersetzung in die
+    Menuetexte waere geraten -- sie ist gemessen, nicht dokumentiert,
+    und wuerde stillschweigend falsch, sobald jemand die Stufen
+    umbenennt.
+    """
+    wert = daten.get("effort")
+    if not isinstance(wert, str) or not RE_STUFE.match(wert):
+        return None
+    einstellungen = daten.get("sessionSettings")
+    if isinstance(einstellungen, dict) and einstellungen.get("ultracode"):
+        return wert + " +ultracode"
+    return wert
+
+
 class LocalSessionWatcher:
     """Modul: Zustand lokaler Cowork-Sessions ("auf diesem Computer") aus
     %APPDATA%/Claude/claude-code-sessions/**/local_*.json.
@@ -1099,6 +1141,17 @@ class LocalSessionWatcher:
         self.root = claude_config_dir() / "claude-code-sessions"
         self.next_refresh = 0.0
         self.text = None
+        self.effort_text = None
+
+    def stufe(self):
+        """Denkstufe der juengsten Sitzung, oder None.
+
+        Aus derselben Datei und derselben Sitzung wie das Modell. Zwei
+        Quellen waeren hier gefaehrlich: bei mehreren offenen Sitzungen
+        stuenden sonst das Modell der einen und die Stufe der anderen in
+        derselben Zeile, und das faellt niemandem auf.
+        """
+        return self.effort_text
 
     def get(self):
         if not self.cfg.get("enabled", True):
@@ -1110,6 +1163,9 @@ class LocalSessionWatcher:
         return self.text
 
     def _read(self):
+        # Zuruecksetzen, nicht nur bei Erfolg setzen: faellt die Lesung
+        # aus, soll keine Stufe von vorhin stehenbleiben.
+        self.effort_text = None
         try:
             if not self.root.is_dir():
                 return None
@@ -1132,6 +1188,8 @@ class LocalSessionWatcher:
             max_age = self.cfg.get("max_age_minutes", 30) * 60
             if best_ts and time.time() - best_ts / 1000.0 > max_age:
                 return None
+            if self.cfg.get("show_effort", True):
+                self.effort_text = stufe_text(best_data)
             text = self.cfg.get("label", "using cowork")
             model = _pretty_model(best_data.get("model"))
             if self.cfg.get("show_model", True) and model:
@@ -1586,12 +1644,25 @@ def main(rolle="extension"):
                 act_text = tool_text
             else:
                 act_text = ui_status or tool_text or activity.get()
+            # Bewusst vorgezogen und nicht in die Kette gesetzt: "or"
+            # kuerzt ab. Gewinnt die erste Quelle, liefe der lokale
+            # Leser nie -- und mit ihm nicht die Denkstufe, die er
+            # nebenbei mitliest.
+            lokal_text = local_session.get()
             info_text = (
                 session.get()
-                or local_session.get()
+                or lokal_text
                 or ui.info()
                 or beacon.get(activity_fresh=bool(act_text))
             )
+
+            # Die Denkstufe gehoert zum Modell, also in dieselbe Zeile.
+            # Sie kommt aus derselben Datei und derselben Sitzung wie das
+            # Modell -- egal, welche Quelle der Kette oben gewonnen hat,
+            # beschrieben wird dieselbe Claude-Sitzung.
+            stufe = local_session.stufe()
+            if info_text and stufe:
+                info_text = "%s · %s" % (info_text, stufe)
 
             # Eine erkannte Taetigkeit gilt als Aktivitaet, auch ohne
             # Tastendruck. Sonst blendet der Leerlauf-Zeitgeber die
