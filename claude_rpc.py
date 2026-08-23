@@ -190,11 +190,36 @@ class SessionInfo:
             ]
             if not files:
                 return None
-            latest = max(files, key=lambda f: f.stat().st_mtime)
             max_age = self.cfg.get("max_age_minutes", 10) * 60
-            if time.time() - latest.stat().st_mtime > max_age:
+            grenze = time.time() - max_age
+            # Die juengste Datei, die auch WIRKLICH ein Modell nennt --
+            # nicht einfach die juengste.
+            #
+            # Unter ~/.claude/projects liegt nicht nur die Sitzung des
+            # Nutzers. Werkzeuge wie claude-mem schreiben dort eigene
+            # Transkripte, und deren Eintraege tragen im Modellfeld
+            # nichts oder "<synthetic>". Am 23.08.2026 gemessen: die
+            # juengste Datei war ein Beobachter-Transkript, 27 Eintraege
+            # im Schwanz, davon 20 mit leerem und 7 mit synthetischem
+            # Modell. Die echte Sitzung lag eine Datei weiter hinten und
+            # haette sauber "Opus 5" geliefert -- angesehen wurde sie
+            # nie. In der Presence stand deshalb die naechste Quelle der
+            # Kette, "using cowork with Opus 5", waehrend eine
+            # Code-Sitzung lief.
+            #
+            # Die Obergrenze haelt den Aufwand fest: jede Datei kostet
+            # einen Sprung ans Ende und 64 KB Lesen.
+            kandidaten = sorted(
+                (f for f in files if f.stat().st_mtime >= grenze),
+                key=lambda f: f.stat().st_mtime, reverse=True,
+            )[:self.cfg.get("max_files", 6)]
+            project = model = None
+            for pfad in kandidaten:
+                project, model = self._parse_tail(pfad)
+                if model:
+                    break
+            if not kandidaten:
                 return None
-            project, model = self._parse_tail(latest)
             template = self.cfg.get("code_template")
             if template:
                 if "{model}" in template and not model:
