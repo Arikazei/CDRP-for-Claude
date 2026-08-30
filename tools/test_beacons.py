@@ -259,14 +259,14 @@ class Vorrang(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             beacons.sender_melden(d, "standalone", pid=4711)
-            beacons.sender_abmelden(d)
+            beacons.sender_abmelden(d, "standalone")
             self.assertIsNone(beacons.fremder_sender(
                 d, "extension", eigene_pid=99, systemweit=False))
 
     def test_kaputter_eintrag_blockiert_nicht(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
-            (d / beacons.SENDER_DATEI).write_text("kein json",
+            (d / beacons.sender_datei("standalone")).write_text("kein json",
                                                   encoding="utf-8")
             self.assertIsNone(beacons.fremder_sender(
                 d, "extension", eigene_pid=99, systemweit=False))

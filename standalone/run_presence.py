@@ -80,6 +80,7 @@ def main():
     os.environ["CLAUDE_RPC_CONFIG"] = str(konfiguration_finden(eigener))
 
     import beacons
+    import hostplatform
     import claude_rpc as rpc
 
     rpc.init_com()
@@ -93,8 +94,16 @@ def main():
         # sich nur beim Senden meldet, wuerde von der Extension nie
         # gesehen -- sie gaebe die Sperre nicht frei und beide warteten
         # aufeinander.
+        # Waehrend des Wartens weiter anmelden -- und deutlich oefter
+        # nachsehen, als der Wartetakt lang ist. Die Extension gibt den
+        # Mutex frei und greift ihn drei Sekunden spaeter zurueck, wenn
+        # niemand schneller ist: gemessen am 30.08.2026, 11:06:50 Rueckzug,
+        # 11:06:53 wieder da. Der Dienst stand danach 18 Minuten stumm.
         for _ in range(WARTETAKT):
             beacons.sender_melden(eigener, "standalone")
+            if hostplatform.single_instance():
+                hostplatform.release_instance()
+                break
             time.sleep(1)
 
 

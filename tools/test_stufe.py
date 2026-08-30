@@ -17,22 +17,22 @@ class Stufe(unittest.TestCase):
     def test_niedrig(self):
         # sessionSettings stand hier auf null: nie angefasst, nicht "aus".
         self.assertEqual(
-            stufe_text({"effort": "low", "sessionSettings": None}), "low")
+            stufe_text({"effort": "low", "sessionSettings": None}), "niedrig")
 
     def test_mittel(self):
         self.assertEqual(
             stufe_text({"effort": "medium",
-                        "sessionSettings": {"ultracode": False}}), "medium")
+                        "sessionSettings": {"ultracode": False}}), "mittel")
 
     def test_hoch(self):
         self.assertEqual(
             stufe_text({"effort": "high",
-                        "sessionSettings": {"ultracode": False}}), "high")
+                        "sessionSettings": {"ultracode": False}}), "hoch")
 
     def test_extra(self):
         self.assertEqual(
             stufe_text({"effort": "xhigh",
-                        "sessionSettings": {"ultracode": False}}), "xhigh")
+                        "sessionSettings": {"ultracode": False}}), "extra")
 
     def test_max(self):
         self.assertEqual(
@@ -43,7 +43,7 @@ class Stufe(unittest.TestCase):
         self.assertEqual(
             stufe_text({"effort": "xhigh",
                         "sessionSettings": {"ultracode": True}}),
-            "xhigh +ultracode")
+            "extra +ultracode")
 
     def test_extra_und_ultracode_sind_unterscheidbar(self):
         # Beide sind xhigh. Wer nur effort liest, verwechselt sie.

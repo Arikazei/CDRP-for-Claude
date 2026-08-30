@@ -134,14 +134,33 @@ def datenordner_kandidaten(datenordner, systemweit=True):
 # uebernimmt die Extension nach einer Minute von selbst; startet er
 # spaeter, weicht sie binnen einer Minute zurueck. Niemand muss sich
 # eine Startreihenfolge merken.
-SENDER_DATEI = "sender.json"
 SENDER_FRISCH = 60
 ROLLEN_RANG = {"standalone": 2, "extension": 1}
 
 
+def sender_datei(rolle):
+    """Je Rolle eine eigene Datei -- und das ist der ganze Punkt.
+
+    Vorher schrieben alle Beteiligten dieselbe sender.json. Gemessen am
+    30.08.2026: die beiden Kandidatenordner sind physisch dieselbe Datei
+    (gleiche st_ino UND st_dev, die Store-Umleitung zeigt auf dasselbe
+    Ziel), und entdoppelt wurde nur ueber den Pfadtext. Jeder Prozess
+    schrieb also seinen Eintrag und las Millisekunden spaeter genau
+    diesen einen wieder -- den eigenen, den fremder_sender ueberspringt.
+    Ergebnis: die Rangregel sah nie einen anderen und entschied nie
+    etwas. Der Vorrang lief seit seiner Einfuehrung ins Leere; in
+    Wahrheit entschied weiter der Mutex nach "wer zuerst zugreift".
+
+    Der Punkt im Namen ist Absicht: der Beacon-Pool ueberliest Dateien
+    mit Punkt im Stamm (siehe Pool.lesen).
+    """
+    sauber = rolle if RE_SLUG.match(rolle or "") else "unbekannt"
+    return "sender.%s.json" % sauber
+
+
 def sender_melden(datenordner, rolle, pid=None):
     """Diesen Prozess als sendende Instanz eintragen."""
-    pfad = Path(datenordner) / SENDER_DATEI
+    pfad = Path(datenordner) / sender_datei(rolle)
     daten = {
         "rolle": rolle,
         "pid": int(pid if pid is not None else os.getpid()),
@@ -149,17 +168,22 @@ def sender_melden(datenordner, rolle, pid=None):
     }
     try:
         pfad.parent.mkdir(parents=True, exist_ok=True)
-        tmp = pfad.with_suffix(".json.tmp")
+        # Zwischendatei je Prozess, nicht je Name. Teilen sich mehrere
+        # Prozesse einen Zwischennamen, tritt sich das Umbenennen
+        # gegenseitig auf die Fuesse: gemessen 2136 Fehlschlaege
+        # ("Zugriff verweigert", "von einem anderen Prozess verwendet"),
+        # davon 107 an einem Tag.
+        tmp = pfad.with_name("%s.%d.tmp" % (pfad.name, daten["pid"]))
         tmp.write_text(json.dumps(daten), encoding="utf-8")
         os.replace(str(tmp), str(pfad))
     except OSError as exc:
         logging.warning("Senderkennung nicht schreibbar (%s)", exc)
 
 
-def sender_abmelden(datenordner):
+def sender_abmelden(datenordner, rolle):
     """Eintrag entfernen, wenn dieser Prozess bewusst aufhoert."""
     try:
-        (Path(datenordner) / SENDER_DATEI).unlink(missing_ok=True)
+        (Path(datenordner) / sender_datei(rolle)).unlink(missing_ok=True)
     except OSError:
         pass
 
@@ -168,28 +192,32 @@ def fremder_sender(datenordner, eigene_rolle, eigene_pid=None,
                    jetzt=None, systemweit=True):
     """Sendet gerade ein hoeherrangiger Prozess? Dann dessen Eintrag.
 
-    Gesucht wird in allen Kandidatenordnern: der Dienst laeuft ausserhalb
-    des Store-Containers, die Extension darin, und beide halten ihren
-    eigenen Pfad fuer den einzigen.
+    Durchsucht werden alle Kandidatenordner und alle Rollen. Die
+    Ordnerliste kann auf dieselbe Datei zeigen (Store-Umleitung) -- das
+    schadet nicht, es wird dann nur zweimal dasselbe gelesen.
     """
     jetzt = time.time() if jetzt is None else jetzt
     eigene_pid = os.getpid() if eigene_pid is None else eigene_pid
     eigener_rang = ROLLEN_RANG.get(eigene_rolle, 0)
     for ordner in datenordner_kandidaten(datenordner, systemweit):
-        try:
-            roh = (ordner / SENDER_DATEI).read_text(encoding="utf-8")
-            daten = json.loads(roh)
-        except (OSError, ValueError):
-            continue
-        if not isinstance(daten, dict):
-            continue
-        zeit = daten.get("updated_at")
-        if not isinstance(zeit, int) or jetzt - zeit > SENDER_FRISCH:
-            continue
-        if daten.get("pid") == eigene_pid:
-            continue
-        if ROLLEN_RANG.get(daten.get("rolle"), 0) > eigener_rang:
-            return daten
+        for rolle in ROLLEN_RANG:
+            if ROLLEN_RANG[rolle] <= eigener_rang:
+                continue
+            try:
+                roh = (ordner / sender_datei(rolle)).read_text(
+                    encoding="utf-8")
+                daten = json.loads(roh)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(daten, dict):
+                continue
+            zeit = daten.get("updated_at")
+            if not isinstance(zeit, int) or jetzt - zeit > SENDER_FRISCH:
+                continue
+            if daten.get("pid") == eigene_pid:
+                continue
+            if ROLLEN_RANG.get(daten.get("rolle"), 0) > eigener_rang:
+                return daten
     return None
 
 
@@ -363,13 +391,20 @@ def karten(eigen, fremde, cfg=None):
                 "aktiv": bool(eigen.get("aktiv")),
             })
     for eintrag in sorted(fremde, key=lambda e: e["client"]):
+        # Laufzeit nur, solange auch wirklich gearbeitet wird. Der
+        # session_start eines ruhenden Clients ist der Beginn seiner
+        # letzten Sitzung, nicht die Dauer von irgendetwas: gemessen am
+        # 30.08.2026 stand neben einem untaetigen Antigravity ein
+        # Zaehler von 19,2 Stunden. Eine Zahl, die niemand erklaeren
+        # kann, ist schlechter als keine.
+        laeuft = eintrag["state"] == "working"
         for zeile in zeilen_von(zeilen_sitzung(eintrag, cfg)):
             ergebnis.append({
                 "client": eintrag["client"],
                 "details": zeile_taetigkeit(eintrag),
                 "zeile": zeile,
-                "start": eintrag.get("session_start"),
-                "aktiv": eintrag["state"] == "working",
+                "start": eintrag.get("session_start") if laeuft else None,
+                "aktiv": laeuft,
             })
     return ergebnis
 

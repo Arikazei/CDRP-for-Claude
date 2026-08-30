@@ -1088,6 +1088,18 @@ class ToolHistoryWatcher:
 
 RE_STUFE = re.compile(r"^[a-z][a-z0-9_-]{0,15}$")
 
+# Die Menuenamen, wie sie der Nutzer sieht. Gemessen, nicht
+# dokumentiert -- deshalb steht ein unbekannter Wert unveraendert da,
+# statt geraten zu werden. tools/probe_stufe.py nimmt die Messung neu
+# auf, falls die Stufen einmal umbenannt werden.
+STUFEN_NAMEN = {
+    "low": "niedrig",
+    "medium": "mittel",
+    "high": "hoch",
+    "xhigh": "extra",
+    "max": "max",
+}
+
 
 def stufe_text(daten):
     """Denkstufe einer Sitzung als Anzeigetext, oder None.
@@ -1114,18 +1126,18 @@ def stufe_text(daten):
     anders behandelt als false, zeigt bei einer frischen Sitzung etwas
     anderes als bei einer benutzten.
 
-    Angezeigt werden die internen Namen. Die Uebersetzung in die
-    Menuetexte waere geraten -- sie ist gemessen, nicht dokumentiert,
-    und wuerde stillschweigend falsch, sobald jemand die Stufen
-    umbenennt.
+    Angezeigt werden die Menuenamen, die der Nutzer kennt. Ein Wert,
+    der nicht in der Tabelle steht, wird unveraendert durchgereicht --
+    dann steht dort zwar ein interner Name, aber nichts Erfundenes.
     """
     wert = daten.get("effort")
     if not isinstance(wert, str) or not RE_STUFE.match(wert):
         return None
+    name = STUFEN_NAMEN.get(wert, wert)
     einstellungen = daten.get("sessionSettings")
     if isinstance(einstellungen, dict) and einstellungen.get("ultracode"):
-        return wert + " +ultracode"
-    return wert
+        return name + " +ultracode"
+    return name
 
 
 class LocalSessionWatcher:
@@ -1568,8 +1580,13 @@ def main(rolle="extension"):
                 logging.info("Ein %s-Prozess (PID %s) uebernimmt - dieser "
                              "Prozess hoert auf zu senden.",
                              hoeher.get("rolle"), hoeher.get("pid"))
-                presence.clear()
-                beacons.sender_abmelden(DATA_DIR)
+                # Bewusst KEIN presence.clear(): der Uebernehmende
+                # schreibt binnen eines Durchlaufs seine eigene Nutzlast
+                # darueber. Geleert wurde hier frueher, und jede
+                # Uebergabe liess die Anzeige sichtbar ausgehen -- genau
+                # das "blinkt und fehlt", ueber das sich der Nutzer
+                # beschwert hat. Wer aufhoert, laesst das Bild stehen.
+                beacons.sender_abmelden(DATA_DIR, rolle)
                 release_instance()
                 return True
 
