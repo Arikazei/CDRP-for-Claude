@@ -9,6 +9,22 @@ wartet, bleibt draußen.
 Inoffizielles Projekt, weder von Anthropic noch von OpenAI, Google oder
 Discord. Windows und Linux.
 
+## Nur Claude Desktop?
+
+Diese Fassung führt Claude Desktop, OpenAI Codex und Google
+Antigravity in einer Aktivität zusammen. Wer allein mit Claude Desktop
+arbeitet und nichts weiter einrichten möchte, nimmt
+[v1.4.4](https://github.com/Arikazei/CDRP-for-Claude/releases/tag/v1.4.4):
+die letzte Fassung vor dem Beacon-Pool, eine reine
+Claude-Desktop-Erweiterung, Installation durch Doppelklick auf die
+`.mcpb`-Datei. Sie wird nicht mehr weiterentwickelt, läuft aber
+unverändert weiter.
+
+Ab Fassung 1.5.0 kommen die beiden anderen Agenten dazu. Seither sendet
+ein eigenständiger Dienst an Discord statt der Erweiterung, und die
+Connectoren für Codex und Antigravity liegen in `connectors/` im
+selben Klon.
+
 ## Was in Discord steht
 
 Discord zeigt zwei Zeilen. Die **erste** sagt ohne Verzögerung, was gerade
