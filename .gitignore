@@ -23,3 +23,10 @@ mcpb/server/config.default.json
 _probe*.py
 _mcp_test.py
 _check.py
+
+# Erzeugt von connectors/codex/install_hooks.py aus hooks.json.in
+connectors/codex/plugin/plugins/codex-discord-presence/hooks.json
+
+# Persoenliche Notizen mit Rechnername und Pfaden - bleiben lokal
+UEBERGABE-NEUER-CHAT.md
+RAMLEAK_REPORT_20260815.md
