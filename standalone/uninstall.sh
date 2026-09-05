@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Entfernt den systemd-Benutzerdienst.
+# Entfernt die systemd-Benutzerdienste von Presence und Waechtern.
 #
 # Danach sendet wieder die Extension in Claude Desktop; sie versucht die
 # Uebernahme im Minutentakt und merkt von selbst, dass der Dienst weg
 # ist.
 set -euo pipefail
 
-EINHEIT="$HOME/.config/systemd/user/claude-discord-presence.service"
+EINHEITEN="$HOME/.config/systemd/user"
 
-systemctl --user disable --now claude-discord-presence.service 2>/dev/null || true
-rm -f "$EINHEIT"
+for name in claude-discord-presence claude-discord-presence-codex \
+            claude-discord-presence-antigravity; do
+    systemctl --user disable --now "$name.service" 2>/dev/null || true
+    rm -f "$EINHEITEN/$name.service"
+done
 systemctl --user daemon-reload
 
-echo "Dienst entfernt. Die Extension uebernimmt binnen einer Minute wieder."
+echo "Dienste entfernt. Die Extension uebernimmt binnen einer Minute wieder."
+echo "Die Codex-Hooks bleiben registriert (~/.codex/hooks.json bzw. Plugin)."

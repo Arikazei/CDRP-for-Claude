@@ -1,4 +1,4 @@
-# Entfernt den Autostart-Eintrag und beendet den laufenden Dienst.
+# Entfernt die Autostart-Eintraege und beendet Dienst und Waechter.
 #
 # Danach sendet wieder die Extension in Claude Desktop -- sie versucht
 # die Uebernahme im Minutentakt und merkt von selbst, dass der Dienst
@@ -6,13 +6,14 @@
 
 $ErrorActionPreference = "Continue"
 $start = [Environment]::GetFolderPath("Startup")
-$vbs = Join-Path $start "DiscordPresence-Dienst.vbs"
 
-if (Test-Path $vbs) {
-    Remove-Item $vbs -Force
-    Write-Host "Autostart entfernt:" $vbs
-} else {
-    Write-Host "Kein Autostart-Eintrag gefunden."
+foreach ($name in @("DiscordPresence-Dienst.vbs", "DiscordRP-Codex.vbs",
+                    "DiscordRP-Antigravity.vbs")) {
+    $vbs = Join-Path $start $name
+    if (Test-Path $vbs) {
+        Remove-Item $vbs -Force
+        Write-Host "Autostart entfernt:" $vbs
+    }
 }
 
 # Nach der Befehlszeile suchen, nicht nach dem Prozessnamen. Der Name
@@ -21,12 +22,19 @@ if (Test-Path $vbs) {
 # Genau daran ist am 22.08.2026 eine alte Instanz uebersehen worden --
 # sie hielt den Mutex, und die Presence blieb stumm, waehrend im
 # Protokoll nur "laeuft bereits" stand.
-$laeuft = Get-CimInstance Win32_Process |
-    Where-Object { $_.CommandLine -like "*run_presence.py*" }
+$muster = "run_presence\.py|connectors[\\/](codex|antigravity)[\\/]watcher\.py"
+$laeuft = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.Name -like "python*" -and $_.ProcessId -ne $PID -and
+    $_.CommandLine -match $muster
+})
 foreach ($p in $laeuft) {
     Stop-Process -Id $p.ProcessId -Force
-    Write-Host "Dienst beendet, PID" $p.ProcessId
+    $letztes = ($p.CommandLine.TrimEnd('"') -split "\\")[-1]
+    Write-Host ("beendet {0,6} {1}" -f $p.ProcessId, $letztes)
 }
-if (-not $laeuft) { Write-Host "Es lief kein Dienst." }
+if (-not $laeuft) { Write-Host "Es lief nichts." }
 
 Write-Host "Die Extension uebernimmt binnen einer Minute wieder."
+Write-Host "Die Codex-Hooks bleiben registriert und schreiben weiter Beacons;"
+Write-Host "ohne Waechter verfallen die nach 15 Minuten. Abschalten: in Codex"
+Write-Host "das Plugin codex-discord-presence deaktivieren."
