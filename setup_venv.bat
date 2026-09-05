@@ -41,8 +41,11 @@ endlocal
 exit /b 0
 
 :pruefe
-REM Store-Fassung ueberspringen, die erste andere nehmen.
+REM Store-Fassung ueberspringen, die erste andere nehmen. Der Vergleich
+REM laeuft ueber Stringersetzung statt ueber find.exe: in einer Shell mit
+REM Unix-Werkzeugen im PATH ist "find" ein anderes Programm.
 if not exist "%~1" exit /b 0
-echo %~1 | find /i "\WindowsApps\" >nul && exit /b 0
-set "PY=%~1"
+set "KANDIDAT=%~1"
+if /i not "!KANDIDAT:\WindowsApps\=!"=="!KANDIDAT!" exit /b 0
+set "PY=!KANDIDAT!"
 exit /b 0
