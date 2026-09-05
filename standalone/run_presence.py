@@ -30,8 +30,17 @@ WARTETAKT = 15
 
 
 def datenordner():
+    """Der eigene Datenordner -- CLAUDE_RPC_DATA_DIR, wenn gesetzt.
+
+    Die Umgebungsvariable gilt ueberall sonst im Projekt; hier wurde sie
+    bisher ueberschrieben. Damit liess sich der Dienst nicht abgetrennt
+    betreiben, etwa fuer einen Test aus einem frischen Klon, ohne den
+    laufenden Datenordner anzufassen.
+    """
+    from pathlib import Path
     from hostplatform import app_data_dir
-    pfad = app_data_dir()
+    eigen = os.environ.get("CLAUDE_RPC_DATA_DIR")
+    pfad = Path(eigen).expanduser().resolve() if eigen else app_data_dir()
     pfad.mkdir(parents=True, exist_ok=True)
     return pfad
 
