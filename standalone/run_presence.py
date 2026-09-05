@@ -86,7 +86,8 @@ def main():
     eigener = datenordner()
     os.environ["CLAUDE_RPC_DATA_DIR"] = str(eigener)
     os.environ.setdefault("CLAUDE_RPC_LOG", str(eigener / "standalone.log"))
-    os.environ["CLAUDE_RPC_CONFIG"] = str(konfiguration_finden(eigener))
+    # Eine ausdruecklich vorgegebene Konfiguration gilt; sonst die Suche.
+    os.environ.setdefault("CLAUDE_RPC_CONFIG", str(konfiguration_finden(eigener)))
 
     import beacons
     import hostplatform
