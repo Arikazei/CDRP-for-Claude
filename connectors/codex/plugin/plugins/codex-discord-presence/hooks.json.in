@@ -1,5 +1,5 @@
 {
-  "description": "Publishes privacy-safe Codex state to the local Discord-presence beacon. Template: connectors/codex/install_hooks.py renders hooks.json from this file.",
+  "description": "Publishes privacy-safe Codex state to the local DiscordRP beacon.",
   "hooks": {
     "SessionStart": [
       {
