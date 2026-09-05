@@ -43,18 +43,21 @@ eigen = {
     "start": int(jetzt),
     "aktiv": True,
 }
-chef = beacons.arbeiter(eintraege)
+# Dieselbe Entscheidung wie in der Hauptschleife: arbeitet jemand, wechselt
+# die Anzeige nur zwischen den Arbeitenden; sonst durch alle.
+arbeitende = beacons.aktive(eintraege)
+fremde = [e for e in eintraege if e["client"] != "claude"]
 print()
-if chef is None:
+if not arbeitende:
     print("Niemand arbeitet -> volle Runde durch alle Clients")
-    liste = beacons.karten(
-        eigen, [e for e in eintraege if e["client"] != "claude"], cfg)
+    liste = beacons.karten(eigen, fremde, cfg)
 else:
-    print("Es arbeitet: %s -> der bekommt die Anzeige allein" % chef["client"])
-    if chef["client"] == "claude":
-        liste = beacons.karten(eigen, [], cfg)
-    else:
-        liste = beacons.karten(None, [chef], cfg)
+    print("Es arbeitet: %s -> nur diese wechseln sich ab"
+          % ", ".join(e["client"] for e in arbeitende))
+    claude_arbeitet = any(e["client"] == "claude" for e in arbeitende)
+    liste = beacons.karten(eigen if claude_arbeitet else None,
+                           [e for e in arbeitende if e["client"] != "claude"],
+                           cfg)
 
 if not liste:
     print("Keine Karte -> Presence bleibt leer")

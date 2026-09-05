@@ -444,6 +444,17 @@ zwei mypyc-kompilierte `.pyd` einschleppt — deshalb läuft HTTP jetzt über
   Fallback-Text.
 - **Zwei Prozesse sind normal.** Das venv-`pythonw.exe` ist nur eine Weiche auf
   den eigentlichen Interpreter.
+- **Dienst und Wächter nicht aus einem Kind der Store-Fassung von Claude
+  Desktop starten** – also nicht aus einer Claude-Code-Sitzung, die in Claude
+  Desktop läuft. Solche Prozesse erben den App-Container: alles unter
+  `AppData\Local` wird für sie nach `Packages\Claude_*\LocalCache\Local`
+  umgeleitet, und beim Lesen überdecken diese Kopien die echten Dateien.
+  Die Extension sieht dann eine veraltete `sender.standalone.json` und weicht
+  nie, und ein Blick in den Datenordner aus derselben Sitzung zeigt alte
+  Stände, obwohl der Dienst gesund ist. Gemessen am 05.09.2026. Abhilfe:
+  `neustart.ps1` aus einem gewöhnlichen Terminal oder über eine geplante
+  Aufgabe starten; liegen schon Kopien im Paketordner, sie von außerhalb des
+  Containers löschen.
 - **Der Bildname ist ein Schlüssel, kein Dateiname.** `large_image_key` muss
   exakt dem Asset-Namen im Discord Developer Portal entsprechen; passt er
   nicht, erscheint die Presence stillschweigend ohne Bild. Discord leitet den
