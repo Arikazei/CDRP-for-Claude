@@ -2,18 +2,192 @@
 
 ## Überblick
 
-Ein Python-Daemon liest lokal, was Claude Desktop gerade tut, und schickt drei
-Textfelder an Discord. Der Daemon läuft entweder eigenständig
-(`start_claude_rpc.vbs`) oder als MCP-Server im `.mcpb`-Paket, das mit der
-Claude-Desktop-App startet und endet.
+Drei Coding-Agenten, eine Discord-Aktivität. Discord zeigt je Nutzer genau
+eine Presence und wählt bei mehreren RPC-Verbindungen unzuverlässig aus.
+Deshalb sendet genau **ein** Prozess, der Sender; alle anderen melden ihm
+ihren Zustand über kleine Dateien, die Beacons. Der Vertrag dafür steht in
+[docs/SPEC-beacon-v1.md](docs/SPEC-beacon-v1.md).
 
 ```
-Claude-Fenster (UI Automation) ─┐
-Desktop-Commander-Verlauf ──────┤
-Sitzungs-/Nutzungsdateien ──────┼─→ claude_rpc.py ─→ Discord-IPC-Pipe ─→ Rich Presence
-Win32 (Fokus, Idle, Prozesse) ──┘        │
-                                          └─→ LAST_STATE ─→ MCP-Werkzeug presence_status
+Produzenten                                  Datenordner                 Sender (genau einer sendet)
+──────────────────────────────────────       ────────────────────────    ─────────────────────────────────────
+Codex-Hook      codex/codex_beacon.py   ─┐                               standalone/run_presence.py   Rang 2
+Codex-Wächter   codex/watcher.py        ─┼─→ beacons/codex.json     ──┐  mcpb/server/main.py          Rang 1
+Antigravity-W.  antigravity/watcher.py  ──→ beacons/antigravity.json ─┼─→   claude_rpc.py + beacons.Pool
+Claude-Daemon   beacons.eigenen_schreiben ─→ beacons/claude.json     ──┘        │
+                                                                                 ├─→ Discord-IPC ─→ Rich Presence
+Jeder Sender meldet sich:  sender.<rolle>.json  {rolle, pid, updated_at}         └─→ state.json ─→ presence_status
 ```
+
+Der Sender selbst liest lokal, was Claude Desktop gerade tut:
+
+```
+Claude-Fenster (UI Automation / AT-SPI) ─┐
+Desktop-Commander-Verlauf ───────────────┤
+Sitzungs-/Nutzungsdateien der App ───────┼─→ claude_rpc.py ─→ Discord-IPC-Pipe ─→ Rich Presence
+Fokus, Leerlauf, Prozessliste ───────────┤        │
+Beacons der anderen Agenten ─────────────┘        └─→ LAST_STATE ─→ state.json, MCP-Werkzeug presence_status
+```
+
+Er läuft in einer von zwei Rollen: als eigenständiger Dienst
+(`standalone/run_presence.py`, Autostart beziehungsweise systemd-Benutzerdienst)
+oder als MCP-Server im `.mcpb`-Paket, das mit Claude Desktop startet und endet.
+Beide führen denselben Code aus (`claude_rpc.main(rolle=…)`); wer sendet,
+regelt das Vorrangprotokoll. Der Dienst hat einen Grund zu existieren: er
+sendet auch, wenn Claude Desktop zu ist und nur Codex oder Antigravity
+arbeiten.
+
+## Vorrangprotokoll
+
+Jeder Sender schreibt seine Kennung nach `<Datenordner>/sender.<rolle>.json`,
+im Sendebetrieb bei jedem Durchlauf, im Wartezustand sekündlich:
+
+```json
+{"rolle": "standalone", "pid": 12345, "updated_at": 1788600000}
+```
+
+Die Regeln stehen in `beacons.py` (`ROLLEN_RANG`, `SENDER_FRISCH`,
+`fremder_sender`):
+
+1. **Rang.** `standalone` (2) schlägt `extension` (1). Innerhalb desselben
+   Rangs entscheidet weiterhin der Einzelinstanz-Mutex.
+2. **Frisch** heißt jünger als 60 Sekunden. Ein älterer Eintrag zählt nicht –
+   ein abgestürzter Dienst blockiert niemanden, und niemand muss aufräumen.
+3. **Jeder Durchlauf** der Hauptschleife: erst `sender_melden`, dann
+   `fremder_sender`. Meldet sich ein Höherrangiger, ruft der Unterlegene
+   `sender_abmelden`, gibt den Mutex frei und kehrt zurück – **ohne**
+   `presence.clear()`. Der Übernehmende schreibt binnen eines Durchlaufs seine
+   eigene Nutzlast darüber; ein Leeren dazwischen ließe die Anzeige sichtbar
+   ausgehen. Genau das war das „blinkt und fehlt" früherer Fassungen.
+4. **Weiter versuchen.** Der Unterlegene beantwortet nur noch Werkzeugaufrufe
+   und versucht die Übernahme erneut: die Extension im Minutentakt, der Dienst
+   alle 15 Sekunden bei sekündlicher Meldung. So sieht die Extension den
+   wartenden Dienst zuverlässig und gibt frei – die Extension lässt den Mutex
+   los und greift ihn drei Sekunden später zurück, wenn niemand schneller ist.
+5. **Je Rolle eine Datei.** Eine gemeinsame `sender.json` hat nicht getragen:
+   die Kandidatenordner unten zeigen auf dieselbe physische Datei, jeder
+   Prozess las Millisekunden nach dem Schreiben seinen eigenen Eintrag zurück,
+   und die Rangregel entschied nie etwas.
+
+Die Folge: keine Startreihenfolge. Läuft der Dienst, weicht die Extension
+binnen einer Minute. Fällt er aus, übernimmt sie binnen einer Minute. Kommt er
+zurück, weicht sie wieder.
+
+## Beacon-Pool
+
+Gelesen wird aus **allen Kandidatenordnern** (`beacons.datenordner_kandidaten`):
+dem eigenen, `%USERPROFILE%\AppData\Local\ClaudeDiscordPresence` und jedem
+`Packages\Claude_*\LocalCache\Local\ClaudeDiscordPresence`. Der Grund ist die
+Store-Umleitung von `%LOCALAPPDATA%`: die Extension in der Store-Fassung von
+Claude Desktop landet im Paketordner, Hook und Wächter als gewöhnliche
+Prozesse im echten. Beide glauben, denselben Pfad zu benutzen. Geschrieben wird
+nur in den eigenen Ordner; Produzenten schreiben nach
+`beacons.produzenten_datenordner` – `CLAUDE_RPC_DATA_DIR`, sonst der Profilpfad,
+der nie umgeleitet wird. Liegt derselbe Client in mehreren Ordnern, gilt der
+jüngste Eintrag.
+
+**Prüfung** (`pruefen`): Pflichtfelder exakt, sonst wird die Datei verworfen
+und das einmal je Prozess protokolliert. Die Zusatzfelder `plan` und `usage`
+werden einzeln geprüft; ein unbrauchbares Zusatzfeld verwirft nur sich selbst.
+Marken werden erst im Sender zu Text (`AKTIONSTEXT`, `DATEIART`) – ein
+Produzent kann keine Formulierung in die Presence schreiben.
+
+**Verfallsleiter** (`verfallen`): ein abgestürzter Produzent hinterlässt eine
+alte Datei, die schrittweise zurückgestuft wird statt sofort geglaubt oder
+sofort verworfen.
+
+| Alter von `updated_at` | Wertung |
+|---|---|
+| < 45 s | wie geschrieben |
+| 45 s bis 180 s | `working` wird zu `waiting` |
+| 180 s bis 900 s | `idle` |
+| > 900 s | ignoriert |
+
+**Rahmen und Karten.** `aktive()` liefert alle Clients mit `state == working`,
+sortiert nach Namen; `karten()` macht daraus vollständige Anzeigen (Zeile 1,
+Zeile 2, Sitzungsbeginn), und `karte_waehlen()` wechselt alle 20 Sekunden –
+nie unter 15, weil Discord bei häufigeren Aktualisierungen die Presence nicht
+drosselt, sondern leert. Zeile 1 und 2 stammen immer vom selben Client. Ohne
+Arbeitenden gilt `rahmen_waehlen()`: der jüngste `waiting`, sonst der jüngste
+fremde `idle`; Claudes eigener Leerlauf hat den Leerlauftext aus der
+Konfiguration. Zwei frühere Anläufe suchten einen Gewinner und waren beide
+falsch: der jüngste Zeitstempel gehört dem, der am öftesten schreibt, und ein
+Besitzervorrang ließ Claude während jeder Cowork-Sitzung den Rahmen behalten.
+
+## Connectoren
+
+### Codex
+
+Zwei Teile, weil die Hooks nur bei Ereignissen feuern.
+
+**Hook** (`connectors/codex/codex_beacon.py`): Codex ruft ihn bei
+`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+`PermissionRequest`, `Stop` und `SessionEnd` mit einer JSON-Nutzlast auf. Aus
+`hook_event_name` und `tool_name` werden `state` und `action`; das Modell nur
+gegen die feste Tabelle `MODEL_LABELS`; `file_kind` nur aus der Endung
+expliziter Pfadfelder (`PATH_KEYS`) oder der Kopfzeile eines `apply_patch`.
+Zwischen den Aufrufen merkt sich der Hook seinen Stand in `codex.state.json`
+(Punkt im Namen: der Pool überliest Beistelldateien). Geschrieben wird bei
+Änderung oder als Herzschlag alle 20 Sekunden; die Antwort ist immer `{}` mit
+Exitcode 0 – ein Presence-Fehler darf einen Codex-Zug nie beeinflussen.
+
+**Wächter** (`connectors/codex/watcher.py`), alle 15 Sekunden:
+
+- App zu (`tasklist`, Vergleich auf Bytes wegen der Konsolen-Codepage) → Beacon
+  löschen, sofort, nicht nach 15 Minuten.
+- App offen, letzter Stand `working` → denselben Stand alle 20 Sekunden mit
+  frischer Uhrzeit nachschreiben, höchstens 10 Minuten. Die Hooks feuern je
+  Werkzeugaufruf; ein langer Denkzug oder ein minutenlanger Befehl käme sonst
+  nach 45 Sekunden als `waiting` an.
+- App offen, Hook-Stand `waiting` → in Ruhe lassen, bis der Sender ihn ohnehin
+  auf `idle` gestuft hätte (200 s); danach ein `idle`-Beacon alle 60 Sekunden.
+  Das hält Codex in der Rotation, solange die App offen ist.
+- Alle 20 Sekunden ein Blick ins Fenster (`fenster.py`): Tarifname und
+  Wochenlimit aus „Nutzung und Abrechnung", abgelegt in `codex.window.json`
+  mit Zeitstempel. Auslastung altert nach 3 Stunden, der Plan nach 30 Tagen.
+
+**Starter.** Codex startet unter Windows keine Befehlszeile mit
+Anführungszeichen; ein Interpreterpfad mit Leerzeichen lässt sich nicht
+eintragen. `install_hooks.py` erzeugt deshalb eine winzige `.cmd` unter einem
+Pfad ohne Leerzeichen, die Interpreter und `codex_beacon.py` des Repos aufruft,
+und füllt damit die Vorlagen `hooks.json` (global) und `plugin/…/hooks.json.in`
+(Plugin). Der Starter wird nie von Hand gepflegt – eine handgepflegte Kopie
+lief hier still auseinander. Codex führt nicht verwaltete Hooks erst aus,
+nachdem sie in `/hooks` bestätigt wurden, und speichert dafür einen Hash je
+Hook in `config.toml`; ändert sich der Starterpfad, ist die Bestätigung erneut
+fällig.
+
+### Antigravity
+
+Ein Wächter (`connectors/antigravity/watcher.py`), Takt eine Sekunde:
+
+- Läuft `Antigravity.exe` nicht (zwischengespeichert für 15 s) → Beacon löschen.
+- Jüngstes Transkript nach Änderungszeit:
+  `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`,
+  angehängt gelesen; halbe Zeilen werden zurückgespult.
+- Positivliste je Zeile: `USER_INPUT` → `thinking`; `view_file` → `reading`;
+  `write_to_file`/`replace_file_content` → `editing`; `run_command` →
+  `running_tests` oder `running_command`; `search_web`/`read_url_content` →
+  `web_search`; `ask_question` → `waiting_approval`; Antwort ohne Werkzeug →
+  `waiting/idle`. `content` und `thinking` werden nicht gelesen; nur aus
+  Systemmeldungen zur Modellwahl kommt ein Modellname aus fester Liste.
+- 30 Sekunden Stille → `waiting/idle` (keine Behauptung, worauf gewartet wird),
+  3 Minuten → `idle`. Herzschlag alle 5 Sekunden bei Arbeit, alle 60 in Ruhe.
+- Fenster (`fenster.py`): nur der Abschnitt „Models & Usage", nur Werte der
+  Form `^\d{1,3}%$` und ein kurzer Planname, nur zwischen den bekannten
+  Überschriften – derselbe Baum enthält den ganzen Editorinhalt. Das Modell
+  kommt aus der Beschriftung des Modellknopfs („Select model, current: …"),
+  nicht aus sichtbarem Text, weil auch Dokumenttext Modellnamen enthält.
+  „Remaining" wird zu „verbraucht" umgerechnet.
+
+### Gemeinsam
+
+`connectors/gemeinsam/uia.py` findet Fenster nach Prozessnamen und liest den
+Baum flach in Dokumentreihenfolge, gedeckelt (20 000 Knoten, 8 Sekunden).
+Eigenes Modul, weil beide Connectoren eine `fenster.py` haben: importiert der
+eine „fenster", bekommt er sich selbst, und der Fehler war lautlos.
+`uiautomation` wird erst dort importiert, damit ein Wächter auch ohne COM
+startet und dann nur auf die Fensterwerte verzichtet.
 
 ## Zustandsmaschine
 

@@ -1,44 +1,70 @@
-# Antigravity Discord Presence Beacon Connector
+# Antigravity-Connector
 
-Produzent fuer Google Antigravity gemaess `SPEC-beacon-v1.md`.
-
-Liest den aktuellen Arbeitszustand laufender Antigravity-Sitzungen aus dem lokalen Transkript (`~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`) und schreibt atomar den Beacon fuer den zentralen Discord-RP-Master.
+Produzent fuer Google Antigravity gemaess
+[docs/SPEC-beacon-v1.md](../../docs/SPEC-beacon-v1.md). Ein Waechter
+(`watcher.py`), der dauerhaft laeuft: er liest das Transkript der laufenden
+Sitzung und schreibt `beacons/antigravity.json`. Er verbindet sich weder mit
+Discord noch mit einer Google-Schnittstelle. Ohne ihn fehlt Antigravity in
+der Presence ganz.
 
 ## Voraussetzungen
 
-- Python 3.8+ (nur Standardbibliothek, keine externen Packages noetig)
-- Google Antigravity installiert und aktiv
+- Python 3.8 oder neuer, nur Standardbibliothek. Fuer Plan, Limits und
+  Modell aus dem Fenster unter Windows zusaetzlich `uiautomation` (steht in
+  `requirements.txt`); fehlt es, laeuft der Waechter ohne diese Angaben.
+- Google Antigravity. Der Waechter findet das Transkript unter
+  `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`
+  und nimmt das juengste nach Aenderungszeit.
 
-## Installation & Start
+## Start
 
-### Manuell / Vordergrund:
+`standalone/install.ps1` legt den Autostart-Eintrag
+`DiscordRP-Antigravity.vbs` an, `standalone/install.sh` den Dienst
+`claude-discord-presence-antigravity`. Von Hand:
 
-```powershell
+```text
 python connectors/antigravity/watcher.py
 ```
 
-### Im Hintergrund (PowerShell / Autostart):
+## Was der Waechter meldet
 
-```powershell
-Start-Process -FilePath "python" -ArgumentList "connectors/antigravity/watcher.py" -WindowStyle Hidden
-```
+| Beobachtung | Beacon |
+|---|---|
+| Antigravity laeuft nicht | Beacon geloescht -- sofort weg, nicht erst nach 15 Minuten |
+| `USER_INPUT` im Transkript | `working / thinking` |
+| `view_file` | `working / reading`, Dateiart aus der Endung |
+| `write_to_file`, `replace_file_content`, `multi_replace_file_content` | `working / editing`, Dateiart aus der Endung |
+| `run_command` | `running_tests`, wenn der Befehl nach einem Testlauf aussieht, sonst `running_command` |
+| `search_web`, `read_url_content` | `working / web_search` |
+| `ask_question` | `waiting / waiting_approval` |
+| Antwort ohne Werkzeug, oder 30 Sekunden Stille | `waiting / idle` |
+| 3 Minuten Stille | `idle / idle`, Herzschlag alle 60 Sekunden |
 
-### Selbsttest / Validierung:
+Bei Arbeit schlaegt das Herz alle 5 Sekunden. Aus dem Fenster (nur Windows,
+nur solange "Einstellungen -> Models & Usage" offen ist): Plan, Wochen- und
+5-Stunden-Limit der Gemini-Modelle, umgerechnet auf *verbraucht*, und das
+Modell aus der Beschriftung des Modellknopfs in der Eingabezeile. Die
+Auslastung altert nach 3 Stunden aus dem Beacon, der Plan nach 30 Tagen.
 
-```powershell
-# Einzelpruefung
+## Datenschutz
+
+1. **Positivliste.** Aus dem Transkript werden nur `type`, der Name des
+   ersten Werkzeugaufrufs und die Endung seines Pfadarguments gelesen.
+   `content`, `thinking`, Prompts und Antworten werden nicht angefasst.
+   Einzige Ausnahme: Systemmeldungen zur Modellwahl, aus denen ein
+   Modellname aus einer festen Liste uebernommen wird.
+2. **Dateiart statt Dateiname.** Der Pfad wird nur auf seine Endung
+   angesehen und sofort verworfen; nach aussen geht eine von 21 Marken.
+3. **Fenster nur nach festem Muster.** Der Fensterbaum enthaelt den ganzen
+   Editorinhalt; uebernommen wird nur, was auf `^\d{1,3}%$` oder die kurze
+   Positivliste des Plannamens passt, und nur zwischen den bekannten
+   Ueberschriften.
+4. **Atomar geschrieben** (`.tmp` und `os.replace`), kein Netzzugriff.
+
+## Kontrolle
+
+```text
 python tools/validate_beacon.py antigravity
-
-# Langzeitpruefung (Atomizitaet & Herzschlag)
 python tools/validate_beacon.py antigravity --watch 300
-
-# Unit-Tests
 python -m unittest connectors/antigravity/test_watcher.py
 ```
-
-## Funktionsweise & Datenschutz
-
-1. **Reine Positivliste:** Liest aus dem Transkript ausschliesslich `type`, `status`, `created_at` und Werkzeugnamen. `content`, `thinking` (Reasoning), Prompts und Antworten werden **vollstaendig ignoriert** und gelangen niemals in den Speicher oder den Beacon.
-2. **Dateiendungs-Mapping (`file_kind`):** Pfade werden nur kurz gelesen, um die Dateiendung auf eine der 21 festen Marken abzubilden (`.py` -> `python`, etc.). Der Pfad wird unmittelbar danach verworfen.
-3. **Atomares Schreiben:** Payloads werden in `.tmp`-Dateien geschrieben und via `os.replace` atomar platziert.
-4. **Kein Netzzugriff:** Der Connector spricht weder mit Discord noch mit externen APIs.
