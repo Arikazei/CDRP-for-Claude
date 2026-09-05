@@ -1,0 +1,26 @@
+{
+  "description": "Vorlage. Meldet den Codex-Zustand als Beacon an die Discord-Presence. connectors/codex/install_hooks.py ersetzt {{PYTHON}}, {{BEACON}} und {{STARTER}} durch die Pfade der lokalen Installation und legt das Ergebnis im Datenordner ab.",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ],
+    "PermissionRequest": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "{{PYTHON}} {{BEACON}}", "commandWindows": "{{STARTER}}", "timeout": 2}]}
+    ]
+  }
+}

@@ -122,6 +122,31 @@ def datenordner_kandidaten(datenordner, systemweit=True):
     return eindeutig
 
 
+def produzenten_datenordner():
+    """Wohin ein Produzent schreibt -- SPEC-beacon-v1, Abschnitt 1.
+
+    Die Schreibseite ist bewusst enger als die Leseseite: geschrieben
+    wird genau ein Ordner, gelesen werden alle Kandidaten oben.
+
+    Nicht ueber LOCALAPPDATA. Ein Prozess aus dem Microsoft Store bekommt
+    diese Variable still umgeleitet, USERPROFILE dagegen nie. Codex-Hook,
+    Antigravity-Waechter und der Pruefer fragen deshalb alle hier nach,
+    statt je eine eigene Fassung dieser Regel zu pflegen -- drei Kopien
+    derselben Zeilen waren es vor dem Umzug ins gemeinsame Repo.
+    """
+    eigen = os.environ.get("CLAUDE_RPC_DATA_DIR")
+    if eigen:
+        return Path(os.path.abspath(os.path.expanduser(eigen)))
+    if os.name == "nt":
+        profil = os.environ.get("USERPROFILE")
+        if not profil:
+            raise RuntimeError("USERPROFILE fehlt")
+        return Path(profil) / "AppData" / "Local" / "ClaudeDiscordPresence"
+    basis = (os.environ.get("XDG_DATA_HOME")
+             or os.path.expanduser("~/.local/share"))
+    return Path(basis) / "ClaudeDiscordPresence"
+
+
 # Wer sendet, wenn Dienst und Extension gleichzeitig laufen?
 #
 # Der Mutex allein entscheidet nach "wer war zuerst da". Bei einem

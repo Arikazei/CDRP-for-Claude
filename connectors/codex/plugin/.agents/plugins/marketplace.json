@@ -1,0 +1,20 @@
+{
+  "name": "personal",
+  "interface": {
+    "displayName": "DiscordRP Local"
+  },
+  "plugins": [
+    {
+      "name": "codex-discord-presence",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-discord-presence"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

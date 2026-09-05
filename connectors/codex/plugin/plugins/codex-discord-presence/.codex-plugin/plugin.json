@@ -1,0 +1,20 @@
+{
+  "name": "codex-discord-presence",
+  "version": "0.1.1",
+  "description": "Publishes privacy-safe Codex lifecycle state to the local DiscordRP beacon.",
+  "author": {
+    "name": "Arikazei"
+  },
+  "hooks": "./hooks.json",
+  "interface": {
+    "displayName": "Codex Discord Presence",
+    "shortDescription": "Publishes Codex activity to the DiscordRP master.",
+    "longDescription": "Runs local lifecycle hooks that map Codex activity to the privacy-safe DiscordRP beacon protocol. Prompts, file names, paths, commands, and search queries never enter the presence payload.",
+    "developerName": "Arikazei",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Automation"
+    ],
+    "defaultPrompt": "Show the current Codex Discord Presence plugin status."
+  }
+}
