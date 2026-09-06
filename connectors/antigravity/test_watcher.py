@@ -6,6 +6,8 @@ Prueft Parser, Positivliste, Endungs-Mapping und Spezifikationskonformitaet.
 """
 
 import json
+import os
+import tempfile
 import unittest
 
 from connectors.antigravity.watcher import (
@@ -21,6 +23,22 @@ from tools.validate_beacon import pruefe, pruefe_werte
 
 
 class TestAntigravityConnector(unittest.TestCase):
+
+    def setUp(self):
+        # Hermetisch: der Waechter schreibt bei jeder verarbeiteten Zeile
+        # einen Beacon. Ohne Wegwerfordner landete der im echten
+        # Datenordner -- am 06.09.2026 stand nach einem Testlauf
+        # "Google Antigravity - running tests" in der Presence.
+        self.temp = tempfile.TemporaryDirectory()
+        self.alter_ordner = os.environ.get("CLAUDE_RPC_DATA_DIR")
+        os.environ["CLAUDE_RPC_DATA_DIR"] = self.temp.name
+
+    def tearDown(self):
+        if self.alter_ordner is None:
+            os.environ.pop("CLAUDE_RPC_DATA_DIR", None)
+        else:
+            os.environ["CLAUDE_RPC_DATA_DIR"] = self.alter_ordner
+        self.temp.cleanup()
 
     def test_file_kind_mapping(self):
         """Prueft, dass alle Endungen ausschliesslich auf erlaubte Marken abbilden."""
