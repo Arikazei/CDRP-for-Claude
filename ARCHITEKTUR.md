@@ -133,10 +133,13 @@ Zwei Teile, weil die Hooks nur bei Ereignissen feuern.
 `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 `PermissionRequest`, `Stop` und `SessionEnd` mit einer JSON-Nutzlast auf. Aus
 `hook_event_name` und `tool_name` werden `state` und `action`; das Modell
-muss ein Muster bestehen (nur Buchstaben, Ziffern, Punkt, Bindestrich,
-Unterstrich, Leerzeichen, höchstens 40 Zeichen – dasselbe wie
-`RE_MODELL_ROH` auf der Claude-Seite), sonst wird es `None`; `MODEL_LABELS`
-verschönert nur noch bekannte Namen. Ein alter Modellwert bleibt nie stehen:
+muss `beacons.RE_MODELL` bestehen (erstes Zeichen alphanumerisch, dann
+Buchstaben, Ziffern, Leerzeichen, `. _ ( ) + -`, höchstens 40 Zeichen – das
+eine Muster für Sender, Connectoren und Prüfer), sonst wird es `None`. Was
+besteht, schreibt `beacons.modell_aus_slug` lesbar: „gpt-6-astra" wird
+„GPT-6 Astra", „gpt-5.1-codex-max" wird „GPT-5.1 Codex Max"; `MODEL_LABELS`
+ist nur noch die Ausnahmeliste für Namen, die sich klein schreiben (`o3`,
+`o4-mini`). Ein alter Modellwert bleibt nie stehen:
 wochenlang zeigte die Presence „GPT-5.6 Sol", während ein Modell lief, das
 die Tabelle nicht kannte; `file_kind` nur aus der Endung
 expliziter Pfadfelder (`PATH_KEYS`) oder der Kopfzeile eines `apply_patch`.

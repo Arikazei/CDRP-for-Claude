@@ -21,36 +21,22 @@ CLIENT = "codex"
 DISPLAY_NAME = "OpenAI Codex"
 HEARTBEAT_SECONDS = 20
 
-# Nur noch Verschoenerung: aus "gpt-5.6-sol" wird "GPT-5.6 Sol". Die
-# Tabelle sperrt kein Modell mehr aus. Frueher war sie die einzige
-# Schleuse, und ein Modell, das nicht darin stand, liess den alten Wert
-# stehen -- wochenlang "GPT-5.6 Sol", waehrend laengst ein anderes lief.
+# Ausnahmeliste, keine Pflichtliste. Die Regel beacons.modell_aus_slug
+# macht aus "gpt-5.6-sol" "GPT-5.6 Sol" und aus "gpt-6-astra" "GPT-6
+# Astra"; alles, was sie richtig schreibt, steht hier nicht mehr. Was
+# bleibt, sind Namen, die sich klein schreiben und die die Regel gross
+# schriebe. Vor der Regel war das eine Tabelle mit 17 Eintraegen, und ein
+# Modell, das nicht darin stand, liess den alten Wert stehen -- wochenlang
+# "GPT-5.6 Sol", waehrend laengst ein anderes lief.
 MODEL_LABELS = (
-    ("gpt-5.6-sol", "GPT-5.6 Sol"),
-    ("gpt-5.6-terra", "GPT-5.6 Terra"),
-    ("gpt-5.6-luna", "GPT-5.6 Luna"),
-    ("gpt-5.5", "GPT-5.5"),
-    ("gpt-5.4", "GPT-5.4"),
-    ("gpt-5.3-codex", "GPT-5.3 Codex"),
-    ("gpt-5.2-codex", "GPT-5.2 Codex"),
-    ("gpt-5.2", "GPT-5.2"),
-    ("gpt-5.1-codex-max", "GPT-5.1 Codex Max"),
-    ("gpt-5.1-codex-mini", "GPT-5.1 Codex Mini"),
-    ("gpt-5.1-codex", "GPT-5.1 Codex"),
-    ("gpt-5.1", "GPT-5.1"),
-    ("gpt-5-codex-mini", "GPT-5 Codex Mini"),
-    ("gpt-5-codex", "GPT-5 Codex"),
-    ("gpt-5", "GPT-5"),
     ("o4-mini", "o4-mini"),
     ("o3", "o3"),
 )
 
-# Das Tor zur Presence: nur Buchstaben, Ziffern, Punkt, Bindestrich,
-# Unterstrich und Leerzeichen, erstes Zeichen alphanumerisch, hoechstens
-# 40 Zeichen -- dasselbe Muster wie beim Claude-Modell (RE_MODELL_ROH).
-# Ein Prompt, ein Pfad, ein Satzzeichen kommt hier nicht durch; ein
-# neues Modell schon.
-RE_MODELL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,39}$")
+# Das Tor zur Presence wohnt in beacons.py: ein Muster fuer Sender,
+# Connectoren und Pruefer. Ein Prompt, ein Pfad, ein Satzzeichen kommt
+# dort nicht durch; ein neues Modell schon.
+RE_MODELL = beacons.RE_MODELL
 
 EXTENSION_KINDS = {
     ".py": "python", ".pyw": "python",
@@ -184,18 +170,17 @@ def model_label(raw_model):
     Besteht der Wert die Musterpruefung nicht, kommt None zurueck, und
     der Aufrufer uebernimmt das None. Ein alter Wert wird nie
     weitergefuehrt: eine Anzeige mit dem falschen Modell ist schlechter
-    als eine ohne.
+    als eine ohne. Besteht er sie, gilt erst die Ausnahmeliste, dann die
+    Regel: "gpt-6-astra" wird "GPT-6 Astra", "o3" bleibt "o3".
     """
-    if not isinstance(raw_model, str):
-        return None
-    candidate = raw_model.strip()
-    if not RE_MODELL.match(candidate):
+    candidate = beacons.modell_saeubern(raw_model)
+    if candidate is None:
         return None
     lowered = candidate.lower()
     for slug, label in MODEL_LABELS:
         if lowered == slug or lowered.startswith(slug + "-"):
             return label
-    return candidate
+    return beacons.modell_aus_slug(candidate)
 
 
 def kind_from_path(path_value):

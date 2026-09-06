@@ -26,6 +26,85 @@ class Pruefen(unittest.TestCase):
     def test_gueltig(self):
         self.assertIsNotNone(beacons.pruefen(eintrag(), "codex"))
 
+    def test_modell_mit_klammern_besteht_sender_und_pruefer(self):
+        # Die Vereinigung der frueheren Muster: "GPT-5 (Preview)" war beim
+        # Produzenten gueltig und beim Pruefer verboten. Jetzt ueberall gleich.
+        d = eintrag(model="GPT-5 (Preview)")
+        self.assertEqual(beacons.pruefen(d, "codex")["model"], "GPT-5 (Preview)")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import validate_beacon
+        self.assertEqual(validate_beacon.pruefe_werte(d), [])
+
+    def test_modell_ueber_40_zeichen_faellt_ueberall_weg(self):
+        d = eintrag(model="A" * 41)
+        self.assertIsNone(beacons.pruefen(d, "codex")["model"])
+        self.assertIsNone(beacons.modell_saeubern("A" * 41))
+        self.assertEqual(beacons.modell_saeubern("A" * 40), "A" * 40)
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import validate_beacon
+        self.assertTrue(any("model" in f for f in validate_beacon.pruefe_werte(d)))
+
+    def test_modell_mit_satzzeichen_kostet_nur_das_modell(self):
+        d = eintrag(model="rm -rf /; echo")
+        geprueft = beacons.pruefen(d, "codex")
+        self.assertIsNotNone(geprueft)
+        self.assertIsNone(geprueft["model"])
+
+    def test_anzeigename_muss_dem_muster_folgen(self):
+        self.assertIsNone(beacons.pruefen(eintrag(display_name="Codex\nZeile 2"), "codex"))
+        self.assertIsNone(beacons.pruefen(eintrag(display_name="C" * 33), "codex"))
+        self.assertIsNotNone(beacons.pruefen(eintrag(display_name="OpenAI Codex (Beta)"), "codex"))
+
+    def test_eigener_beacon_faellt_auf_vorgabe_zurueck(self):
+        with tempfile.TemporaryDirectory() as d:
+            beacons.eigenen_schreiben(Path(d), "idle", "idle", None, None,
+                                      display_name="Claude\tDesktop!!")
+            daten = json.loads((Path(d) / "beacons" / "claude.json").read_text("utf-8"))
+            self.assertEqual(daten["display_name"], beacons.EIGENER_NAME)
+            self.assertIsNotNone(beacons.pruefen(daten, "claude"))
+
+
+class ModellAusSlug(unittest.TestCase):
+
+    def test_regel_statt_tabelle(self):
+        f = beacons.modell_aus_slug
+        self.assertEqual(f("gpt-6-astra"), "GPT-6 Astra")
+        self.assertEqual(f("gpt-5.6-sol"), "GPT-5.6 Sol")
+        self.assertEqual(f("gpt-5.1-codex-max"), "GPT-5.1 Codex Max")
+        self.assertEqual(f("gpt-5"), "GPT-5")
+        self.assertEqual(f("GPT-6-Astra"), "GPT-6 Astra")
+        self.assertEqual(f("gpt-5.6-sol-20260801"), "GPT-5.6 Sol")
+
+    def test_kein_bezeichner_bleibt_wie_er_ist(self):
+        f = beacons.modell_aus_slug
+        self.assertEqual(f("Astra 6"), "Astra 6")
+        self.assertEqual(f("Gemini 3.7 Flash"), "Gemini 3.7 Flash")
+        self.assertEqual(f("o3"), "o3")
+        self.assertEqual(f("GPT-5 (Preview)"), "GPT-5 (Preview)")
+        self.assertIsNone(f(None))
+
+
+class EinMusterNichtFuenf(unittest.TestCase):
+
+    def test_muster_wohnen_nur_in_beacons(self):
+        # Vorher stand dasselbe Muster an fuenf Stellen in drei Fassungen,
+        # und Pruefer und Vertrag verwarfen gueltige Beacons. Jede zweite
+        # Fassung im Repo ist ein Fehler.
+        wurzel = Path(beacons.__file__).resolve().parent
+        verdaechtig = ("[A-Za-z0-9]", "A-Za-z0-9 .", "A-Za-z0-9 _")
+        treffer = []
+        for pfad in wurzel.rglob("*.py"):
+            teile = pfad.relative_to(wurzel).parts
+            if teile[0] in (".venv", "build", "dist", "__pycache__"):
+                continue
+            if pfad.name in ("beacons.py", "test_beacons.py"):
+                continue
+            text = pfad.read_text("utf-8", errors="replace")
+            for muster in verdaechtig:
+                if muster in text:
+                    treffer.append("%s: %s" % ("/".join(teile), muster))
+        self.assertEqual(treffer, [])
+
     def test_unbekannter_schluessel(self):
         d = eintrag()
         d["extra"] = 1

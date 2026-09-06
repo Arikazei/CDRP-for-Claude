@@ -43,6 +43,66 @@ AKTIONEN = {
 }
 RE_SLUG = re.compile(r"^[a-z0-9_-]{1,32}$")
 
+# Die Muster fuer Anzeigename und Modell wohnen NUR hier. Sender,
+# beide Connectoren, der Fensterleser und der Pruefer importieren sie;
+# der Vertrag verweist hierher. Vorher standen sie an fuenf Stellen in
+# drei Fassungen, und Pruefer und Vertrag verwarfen Beacons, die die
+# Produzenten gueltig schreiben durften. tools/test_beacons.py wacht
+# darueber, dass keine zweite Fassung entsteht.
+#
+# Das Modellmuster ist die Vereinigung der frueheren Fassungen: erstes
+# Zeichen alphanumerisch, dann Buchstaben, Ziffern, Leerzeichen, Punkt,
+# Unterstrich, Klammern, Plus, Bindestrich, hoechstens 40 Zeichen. Damit
+# bleibt "GPT-5 (Preview)" gueltig, und aus einem Prompt, Pfad oder
+# Satzzeichen laesst sich trotzdem kein Modellname bauen.
+NAME_MAX = 32
+MODELL_MAX = 40
+RE_NAME = re.compile(r"^[A-Za-z0-9 .()+-]{1,%d}$" % NAME_MAX)
+RE_MODELL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,%d}$" % (MODELL_MAX - 1))
+
+# Ein Modellbezeichner wie "gpt-6-astra": Familie, Version, Beiname(n).
+RE_MODELL_SLUG = re.compile(r"^([a-z]+)-(\d+(?:\.\d+)*)((?:-[a-z0-9]+)*)$")
+
+
+def modell_aus_slug(wert):
+    """Aus einem Bezeichner einen lesbaren Namen machen.
+
+        gpt-6-astra          -> GPT-6 Astra
+        gpt-5.6-sol          -> GPT-5.6 Sol
+        gpt-5.1-codex-max    -> GPT-5.1 Codex Max
+        gpt-5.6-sol-20260801 -> GPT-5.6 Sol   (Datumsstempel faellt weg)
+
+    Was kein Bezeichner ist -- "Astra 6", "Gemini 3.7 Flash", "o3" --,
+    kommt unveraendert zurueck. Das Vorbild ist die Regel fuer Claude-
+    Bezeichner in claude_rpc.py: eine Regel statt einer Liste, damit ein
+    neues Modell nicht erst ein Update braucht, um ordentlich
+    auszusehen. Ausnahmen, die die Regel falsch schriebe (o3, o4-mini),
+    fuehrt der Codex-Connector in einer kurzen Ausnahmeliste.
+    """
+    if not isinstance(wert, str):
+        return wert
+    treffer = RE_MODELL_SLUG.match(wert.strip().lower())
+    if not treffer:
+        return wert.strip()
+    familie, version, rest = treffer.groups()
+    familie = familie.upper() if len(familie) <= 3 else familie.capitalize()
+    teile = [t for t in rest.split("-") if t]
+    # Ein reiner Zahlenblock am Ende ist ein Datumsstempel, kein Beiname.
+    while teile and teile[-1].isdigit() and len(teile[-1]) >= 6:
+        teile.pop()
+    name = "%s-%s" % (familie, version)
+    if teile:
+        name += " " + " ".join(t.capitalize() for t in teile)
+    return name
+
+
+def modell_saeubern(wert):
+    """Modellwert eines Produzenten annehmen -- oder None."""
+    if not isinstance(wert, str):
+        return None
+    wert = wert.strip()
+    return wert if RE_MODELL.match(wert) else None
+
 # Verfallsleiter. Ein abgestuerzter Produzent hinterlaesst eine alte Datei;
 # sie wird schrittweise zurueckgestuft statt sofort geglaubt oder sofort
 # verworfen. So verschwindet ein langer, ereignisloser Denkzug nicht, und
@@ -288,6 +348,12 @@ def pruefen(daten, slug):
         return None
     if daten.get("v") != 1 or daten.get("client") != slug:
         return None
+    # Zeile 1 der Presence ist dieser Name. Ein Name, der das Muster
+    # nicht besteht, ist kein Name -- fail closed wie bei jedem
+    # Pflichtfeld.
+    name = daten.get("display_name")
+    if not isinstance(name, str) or not RE_NAME.match(name):
+        return None
     if daten.get("state") not in ZUSTAENDE:
         return None
     if daten.get("action") not in AKTIONEN:
@@ -299,6 +365,11 @@ def pruefen(daten, slug):
     if not isinstance(zeit, int) or isinstance(zeit, bool):
         return None
     geprueft = dict(daten)
+    # Das Modell steht in Zeile 2. Die Produzenten pruefen es schon;
+    # hier ist die zweite Schleuse, die der Vertrag beschreibt. Ein
+    # unbrauchbares Modell kostet nur das Modell, nicht den Beacon.
+    if geprueft.get("model") is not None:
+        geprueft["model"] = modell_saeubern(geprueft["model"])
     for schluessel, saeubern in (("plan", plan_saeubern),
                                  ("usage", usage_saeubern)):
         if schluessel in geprueft:
@@ -672,10 +743,14 @@ def eigenen_schreiben(datenordner, state, action, model, session_start,
     dieselbe Regel und derselbe Verfall.
     """
     ordner = datenordner / "beacons"
+    # Der Name kommt aus der Konfiguration. Besteht er das Muster nicht,
+    # wuerde der Pool den eigenen Beacon verwerfen -- dann gilt die Vorgabe.
+    if not isinstance(display_name, str) or not RE_NAME.match(display_name):
+        display_name = EIGENER_NAME
     daten = {
         "v": 1,
         "client": "claude",
-        "display_name": display_name or EIGENER_NAME,
+        "display_name": display_name,
         "state": state,
         "action": action,
         "model": model,

@@ -66,7 +66,8 @@ logging.basicConfig(
 # Ein roher Modellbezeichner wird nur uebernommen, wenn er wie ein Name
 # aussieht. Claude Code traegt fuer eingefuegte Eintraege "<synthetic>"
 # ins Modellfeld ein, und das stand danach woertlich in der Presence.
-RE_MODELL_ROH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,39}$")
+# Das Muster wohnt in beacons.py, zusammen mit dem der Connectoren.
+RE_MODELL_ROH = beacons.RE_MODELL
 
 PAUSE_PATH = DATA_DIR / "paused.flag"
 _PAUSED = PAUSE_PATH.exists()

@@ -80,15 +80,24 @@ verwirft die Datei (fail closed) und protokolliert das einmal.
 |---|---|---|
 | `v` | int | genau `1` |
 | `client` | string | `^[a-z0-9_-]{1,32}$`, gleich dem Dateinamen |
-| `display_name` | string | `^[A-Za-z0-9 .()+-]{1,32}$` |
+| `display_name` | string | Muster `beacons.RE_NAME`: Buchstaben, Ziffern, Leerzeichen, `. ( ) + -`, hoechstens 32 Zeichen |
 | `state` | string | `working` \| `waiting` \| `idle` |
 | `action` | string | nur aus der Liste unten |
-| `model` | string/null | `^[A-Za-z0-9 ._()+-]{1,32}$` oder `null` |
+| `model` | string/null | Muster `beacons.RE_MODELL`: erstes Zeichen alphanumerisch, dann Buchstaben, Ziffern, Leerzeichen, `. _ ( ) + -`, hoechstens 40 Zeichen -- oder `null` |
 | `session_start` | int/null | Unix-Sekunden, nicht Millisekunden |
 | `updated_at` | int | Unix-Sekunden, hoechstens 5 s in der Zukunft |
 | `file_kind` | string/null | nur aus der Liste unten, sonst `null` |
 
 Alle Felder sind Pflicht.
+
+Die Muster fuer `display_name` und `model` sind hier nur beschrieben, nicht
+abgeschrieben: sie wohnen genau einmal in `beacons.py` (`RE_NAME`,
+`RE_MODELL`), und Sender, Produzenten und `tools/validate_beacon.py`
+importieren sie von dort. Wer das Muster aendert, aendert es an einer
+Stelle. Nachtrag vom 06.09.2026: vorher standen fuenf Fassungen im Repo,
+und Pruefer und Vertrag verwarfen Modelle, die die Produzenten gueltig
+schreiben durften; seither gilt die Vereinigung (40 Zeichen, Klammern und
+Plus erlaubt).
 
 ### Erlaubte `action`-Werte (abschliessend)
 

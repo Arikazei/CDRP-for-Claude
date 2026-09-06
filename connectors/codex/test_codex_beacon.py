@@ -107,9 +107,9 @@ class BeaconTest(unittest.TestCase):
         # nicht kannte. Ein plausibler Name wird jetzt durchgereicht.
         beacon = self.emit("UserPromptSubmit", 3000, model="Astra 6")
         self.assertEqual(beacon["model"], "Astra 6")
-        beacon = self.emit("PreToolUse", 3001, model="astra-6-preview",
+        beacon = self.emit("PreToolUse", 3001, model="gpt-6-astra",
                            tool_name="Bash", tool_input={"command": "ls"})
-        self.assertEqual(beacon["model"], "astra-6-preview")
+        self.assertEqual(beacon["model"], "GPT-6 Astra")
 
     def test_table_still_beautifies_known_models(self):
         beacon = self.emit("UserPromptSubmit", 3100, model="gpt-5.6-sol-20260801")
@@ -141,6 +141,13 @@ class BeaconTest(unittest.TestCase):
 
     def test_model_label_rules(self):
         self.assertEqual(codex_beacon.model_label("gpt-5.6-sol"), "GPT-5.6 Sol")
+        self.assertEqual(codex_beacon.model_label("gpt-6-astra"), "GPT-6 Astra")
+        self.assertEqual(codex_beacon.model_label("gpt-5.1-codex-max"), "GPT-5.1 Codex Max")
+        self.assertEqual(codex_beacon.model_label("o3"), "o3")
+        self.assertEqual(codex_beacon.model_label("o4-mini"), "o4-mini")
+        self.assertEqual(codex_beacon.model_label("o3-2026-01-01"), "o3")
+        self.assertEqual(codex_beacon.model_label("GPT-5 (Preview)"), "GPT-5 (Preview)")
+        self.assertIsNone(codex_beacon.model_label("g" * 41))
         self.assertEqual(codex_beacon.model_label("  Astra 6  "), "Astra 6")
         self.assertIsNone(codex_beacon.model_label("-astra"))
         self.assertIsNone(codex_beacon.model_label("a" * 41))

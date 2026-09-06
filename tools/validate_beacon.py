@@ -12,7 +12,6 @@ Rueckgabe 0 = OK, 1 = Regelverstoss. Ohne "OK" keine Abnahme.
 """
 import json
 import os
-import re
 import sys
 import time
 
@@ -39,9 +38,12 @@ FELDER = {
 }
 # Nachtrag 1.1: freiwillig -- aber wenn vorhanden, dann nach Regel.
 ZUSATZFELDER = {"plan", "usage"}
-RE_SLUG = re.compile(r"^[a-z0-9_-]{1,32}$")
-RE_NAME = re.compile(r"^[A-Za-z0-9 .()+-]{1,32}$")
-RE_MODELL = re.compile(r"^[A-Za-z0-9 ._()+-]{1,32}$")
+# Die Muster wohnen in beacons.py -- eine Fassung fuer Sender,
+# Produzenten und Pruefer. Eine Kopie hier lief schon einmal auseinander
+# und verwarf Beacons, die die Produzenten gueltig schreiben durften.
+RE_SLUG = beacons.RE_SLUG
+RE_NAME = beacons.RE_NAME
+RE_MODELL = beacons.RE_MODELL
 
 
 def beacon_ordner():

@@ -90,9 +90,9 @@ ENDUNG_ZU_DATEIART = {
     ".xml": "data", ".proto": "data", ".pb": "data", ".db": "data", ".sqlite": "data", ".sqlite3": "data",
 }
 
-# Modellnamen: dasselbe Tor wie bei Claude und Codex. Nur Buchstaben,
-# Ziffern, Punkt, Bindestrich, Unterstrich, Leerzeichen; hoechstens 40.
-RE_MODELL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,39}$")
+# Modellnamen: dasselbe Tor wie bei Claude und Codex, definiert in
+# beacons.py.
+RE_MODELL = beacons.RE_MODELL
 
 # Regex zur Erkennung von Test-Befehlen bei run_command
 RE_TEST_BEFEHL = re.compile(
@@ -213,7 +213,9 @@ def parse_modell_name(text: Optional[str]) -> Optional[str]:
     # selbst erkennen. Das Muster laesst nur Zeichen durch, aus denen
     # sich kein Satz bauen laesst; alles andere wird verworfen.
     if RE_MODELL.match(zieltext):
-        return zieltext
+        # Antigravity schreibt lesbare Namen ("Gemini 3.7 Flash"); kaeme
+        # doch einmal ein Bezeichner, gilt dieselbe Regel wie bei Codex.
+        return beacons.modell_aus_slug(zieltext)
     return None
 
 
@@ -308,7 +310,7 @@ class AntigravityWatcher:
         # Das Modell steht in der Eingabezeile und ist damit verlaesslicher
         # als das Warten auf einen Modellwechsel im Transkript.
         if gelesen.get("model"):
-            self.aktuelles_modell = gelesen["model"]
+            self.aktuelles_modell = beacons.modell_aus_slug(gelesen["model"])
 
     def suche_neuestes_transkript(self) -> Optional[Path]:
         """Findet das juengste transcript.jsonl nach Aenderungszeit."""

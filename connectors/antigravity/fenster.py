@@ -30,8 +30,12 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gemeinsam"))
+_HIER = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(_HIER), "gemeinsam"))
+_WURZEL = os.path.dirname(os.path.dirname(_HIER))
+if _WURZEL not in sys.path:
+    sys.path.insert(0, _WURZEL)
+import beacons  # noqa: E402
 import uia  # noqa: E402
 
 ANKER = "Models & Usage"
@@ -42,7 +46,8 @@ LABEL_5H = "Five Hour Limit Remaining"
 LABEL_PLAN = "Your Plan:"
 
 RE_PROZENT = re.compile(r"^(\d{1,3})\s?%$")
-RE_PLAN = re.compile(r"^[A-Za-z0-9 ()×.+/-]{1,32}$")
+# Dieselben Muster wie im Sender: was hier durchkommt, nimmt er auch an.
+RE_PLAN = beacons.RE_PLAN
 # Das Modell steht in der Eingabezeile. Der Knopf dort traegt eine
 # Beschriftung fuer Bildschirmleser, und die ist die beste Quelle, die
 # es gibt: "Select model, current: Gemini 3.7 Flash High".
@@ -55,7 +60,7 @@ RE_PLAN = re.compile(r"^[A-Za-z0-9 ()×.+/-]{1,32}$")
 # nicht passieren.
 RE_MODELLKNOPF = re.compile(
     r"^(?:Select model, current|Modell auswählen, aktuell)\s*:\s*(.+)$")
-RE_MODELLNAME = re.compile(r"^[A-Za-z0-9 .()-]{1,40}$")
+RE_MODELLNAME = beacons.RE_MODELL
 
 
 def _wert_nach(flach, von, bis, label):
