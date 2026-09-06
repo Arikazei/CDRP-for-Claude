@@ -89,17 +89,64 @@ class BeaconTest(unittest.TestCase):
                 self.assertNotIn(private, raw)
             self.assertFalse(os.path.exists(path + ".tmp"))
 
-    def test_unknown_tool_and_model_are_closed(self):
+    def test_unknown_tool_is_closed_and_model_with_symbols_dropped(self):
         self.emit("SessionStart", 2000, source="startup",
-                  model="unknown private model")
+                  model="secret/model:1 (PRIVATE)")
         beacon = self.emit("PreToolUse", 2001,
-                           model="unknown private model",
+                           model="secret/model:1 (PRIVATE)",
                            tool_name="private_tool",
                            tool_input={"secret": "PRIVATE"})
         self.assertEqual(beacon["action"], "running_command")
         self.assertIsNone(beacon["model"])
         self.assertIsNone(beacon["file_kind"])
         self.assertNotIn("PRIVATE", json.dumps(beacon))
+
+    def test_new_model_passes_without_a_table_entry(self):
+        # Gemessen am 06.09.2026: wochenlang stand "GPT-5.6 Sol" in der
+        # Presence, waehrend laengst ein Modell lief, das die Tabelle
+        # nicht kannte. Ein plausibler Name wird jetzt durchgereicht.
+        beacon = self.emit("UserPromptSubmit", 3000, model="Astra 6")
+        self.assertEqual(beacon["model"], "Astra 6")
+        beacon = self.emit("PreToolUse", 3001, model="astra-6-preview",
+                           tool_name="Bash", tool_input={"command": "ls"})
+        self.assertEqual(beacon["model"], "astra-6-preview")
+
+    def test_table_still_beautifies_known_models(self):
+        beacon = self.emit("UserPromptSubmit", 3100, model="gpt-5.6-sol-20260801")
+        self.assertEqual(beacon["model"], "GPT-5.6 Sol")
+
+    def test_unknown_model_replaces_the_old_value_with_none(self):
+        self.emit("UserPromptSubmit", 3200, model="gpt-5.6-sol")
+        beacon = self.emit("PreToolUse", 3201, model="X:\\geheim\\modell.txt",
+                           tool_name="Bash", tool_input={"command": "ls"})
+        self.assertIsNone(beacon["model"])
+        beacon = self.emit("PostToolUse", 3202, model=None)
+        self.assertIsNone(beacon["model"])
+
+    def test_model_survives_events_without_a_model_field(self):
+        self.emit("UserPromptSubmit", 3300, model="Astra 6")
+        nutzlast = {"hook_event_name": "PostToolUse"}
+        codex_beacon.process_payload(nutzlast, now=3301)
+        self.assertEqual(self.read_beacon()["model"], "Astra 6")
+
+    def test_stored_state_is_checked_on_load(self):
+        _, state_path = codex_beacon.beacon_paths()
+        codex_beacon.atomic_json(state_path, {
+            "state": "working", "action": "thinking",
+            "model": "<synthetic>", "session_start": 1, "updated_at": 1,
+            "file_kind": None})
+        vorher = codex_beacon.normalized_previous(
+            codex_beacon.load_state(state_path))
+        self.assertIsNone(vorher["model"])
+
+    def test_model_label_rules(self):
+        self.assertEqual(codex_beacon.model_label("gpt-5.6-sol"), "GPT-5.6 Sol")
+        self.assertEqual(codex_beacon.model_label("  Astra 6  "), "Astra 6")
+        self.assertIsNone(codex_beacon.model_label("-astra"))
+        self.assertIsNone(codex_beacon.model_label("a" * 41))
+        self.assertIsNone(codex_beacon.model_label("Astra 6!"))
+        self.assertIsNone(codex_beacon.model_label(None))
+        self.assertIsNone(codex_beacon.model_label(6))
 
 
 if __name__ == "__main__":

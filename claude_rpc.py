@@ -1538,7 +1538,7 @@ def main(rolle="extension"):
         Rueckgabe ist die gesendete Nutzlast oder None.
         """
         eintraege = pool.lesen(jetzt)
-        arbeitend = beacons.aktive(eintraege)
+        arbeitend = beacons.aktive(eintraege, jetzt)
         if arbeitend:
             # Nur die, die wirklich arbeiten. Sind es mehrere, kommen
             # sie nacheinander dran statt dass einer den anderen

@@ -103,8 +103,17 @@ sofort verworfen.
 | 180 s bis 900 s | `idle` |
 | > 900 s | ignoriert |
 
-**Rahmen und Karten.** `aktive()` liefert alle Clients mit `state == working`,
-sortiert nach Namen; `karten()` macht daraus vollständige Anzeigen (Zeile 1,
+**Rahmen und Karten.** `aktive()` liefert alle Clients, die arbeiten
+(`state == working` oder `action == waiting_approval` – wer den Nutzer um
+Freigabe bittet, hat gerade dessen ganze Aufmerksamkeit), sortiert nach Namen.
+Wer von `working` auf `waiting` fällt, bleibt für eine **befristete
+Nachlauffrist** von 25 Sekunden (`NACHLAUF`) in der Menge: die Hooks von Codex
+feuern nur je Ereignis, und in der Lücke dazwischen galt sonst niemand mehr
+als arbeitend – das volle Karussell sprang an, und ein untätig wartender
+Claude stand in der Presence (gemessen am 06.09.2026). Die Frist beginnt erst
+nach echter Arbeit, läuft ohne neues Ereignis ab und endet bei `idle` sofort;
+unbefristet war dieselbe Idee in 1.6.2 gescheitert, weil Claude den Rahmen
+nie mehr abgab. `karten()` macht daraus vollständige Anzeigen (Zeile 1,
 Zeile 2, Sitzungsbeginn), und `karte_waehlen()` wechselt alle 20 Sekunden –
 nie unter 15, weil Discord bei häufigeren Aktualisierungen die Presence nicht
 drosselt, sondern leert. Zeile 1 und 2 stammen immer vom selben Client. Ohne
@@ -123,8 +132,13 @@ Zwei Teile, weil die Hooks nur bei Ereignissen feuern.
 **Hook** (`connectors/codex/codex_beacon.py`): Codex ruft ihn bei
 `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 `PermissionRequest`, `Stop` und `SessionEnd` mit einer JSON-Nutzlast auf. Aus
-`hook_event_name` und `tool_name` werden `state` und `action`; das Modell nur
-gegen die feste Tabelle `MODEL_LABELS`; `file_kind` nur aus der Endung
+`hook_event_name` und `tool_name` werden `state` und `action`; das Modell
+muss ein Muster bestehen (nur Buchstaben, Ziffern, Punkt, Bindestrich,
+Unterstrich, Leerzeichen, höchstens 40 Zeichen – dasselbe wie
+`RE_MODELL_ROH` auf der Claude-Seite), sonst wird es `None`; `MODEL_LABELS`
+verschönert nur noch bekannte Namen. Ein alter Modellwert bleibt nie stehen:
+wochenlang zeigte die Presence „GPT-5.6 Sol", während ein Modell lief, das
+die Tabelle nicht kannte; `file_kind` nur aus der Endung
 expliziter Pfadfelder (`PATH_KEYS`) oder der Kopfzeile eines `apply_patch`.
 Zwischen den Aufrufen merkt sich der Hook seinen Stand in `codex.state.json`
 (Punkt im Namen: der Pool überliest Beistelldateien). Geschrieben wird bei
@@ -170,7 +184,8 @@ Ein Wächter (`connectors/antigravity/watcher.py`), Takt eine Sekunde:
   `running_tests` oder `running_command`; `search_web`/`read_url_content` →
   `web_search`; `ask_question` → `waiting_approval`; Antwort ohne Werkzeug →
   `waiting/idle`. `content` und `thinking` werden nicht gelesen; nur aus
-  Systemmeldungen zur Modellwahl kommt ein Modellname aus fester Liste.
+  Systemmeldungen zur Modellwahl kommt der Zielname nach „to", geprüft gegen
+  dasselbe Muster wie bei Codex – kein Treffer setzt das Modell auf `None`.
 - 30 Sekunden Stille → `waiting/idle` (keine Behauptung, worauf gewartet wird),
   3 Minuten → `idle`. Herzschlag alle 5 Sekunden bei Arbeit, alle 60 in Ruhe.
 - Fenster (`fenster.py`): nur der Abschnitt „Models & Usage", nur Werte der

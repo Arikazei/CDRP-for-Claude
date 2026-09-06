@@ -349,7 +349,29 @@ def rahmen_waehlen(eintraege):
     return None
 
 
-def aktive(eintraege):
+# Nachlauffrist. Ein Client, dessen Beacon von "working" auf "waiting"
+# gefallen ist, bleibt so lange in der aktiven Menge. Der Grund steht in
+# aktive(); die Zahl ist ein Kompromiss: laenger als die Luecke zwischen
+# zwei Hook-Ereignissen, kuerzer als ein echter Uebergang in den
+# Leerlauf.
+NACHLAUF = 25
+
+# Wann ein Client zuletzt wirklich gearbeitet hat, je Client. Von
+# aktive() gepflegt; Tests geben ein eigenes Gedaechtnis mit.
+_ZULETZT_AKTIV = {}
+
+
+def arbeitet(eintrag):
+    """Arbeit im Sinne der Rahmenwahl: working -- oder die Rueckfrage.
+
+    "waiting_approval" heisst, der Agent wartet auf den Nutzer. Das ist
+    der Moment groesster Aufmerksamkeit, nicht Leerlauf.
+    """
+    return (eintrag["state"] == "working"
+            or eintrag["action"] == "waiting_approval")
+
+
+def aktive(eintraege, jetzt=None, gedaechtnis=None):
     """Alle Clients, die gerade wirklich etwas tun -- in fester Ordnung.
 
     Zwei Anlaeufe waren vorher falsch, und beide aus demselben Grund:
@@ -375,9 +397,44 @@ def aktive(eintraege):
     Durchlauf springt: der Wechsel haengt an der Uhrzeit, und eine
     wechselnde Reihenfolge liesse die Anzeige zufaellig hin und her
     hopsen.
+
+    Der dritte Fehler, gemessen am 06.09.2026: Codex fiel zwischen zwei
+    Hook-Ereignissen fuer eine Sekunde auf "waiting" -- Genehmigungs-
+    frage, Ende eines Zuges, Luecke zwischen zwei Werkzeugaufrufen --
+    und in genau dieser Sekunde galt niemand mehr als arbeitend. Das
+    volle Karussell sprang an, und Claude, der die ganze Zeit untaetig
+    wartete, stand in der Presence. Deshalb zwei Ergaenzungen:
+
+    - "waiting_approval" zaehlt als Arbeit (siehe arbeitet()).
+    - Eine BEFRISTETE Nachlauffrist: wer zuletzt vor hoechstens NACHLAUF
+      Sekunden gearbeitet hat und jetzt "waiting" meldet, bleibt drin.
+      Die Frist beginnt erst nach echter Arbeit und laeuft ohne neues
+      Ereignis ab. Unbefristet war das in Fassung 1.6.2 schon einmal
+      gescheitert -- der bisherige Besitzer bekam Vorrang, und Claude
+      gab den Rahmen nie wieder ab. Ein Leerlauf ("idle") beendet die
+      Frist sofort: wer sein Programm zumacht, soll auch gehen.
+
+    Das Gedaechtnis ist ein kleines Woerterbuch "Client -> zuletzt
+    gearbeitet um"; Eintraege, die ablaufen oder deren Client fehlt,
+    werden bei jedem Aufruf entfernt.
     """
-    return sorted((e for e in eintraege if e["state"] == "working"),
-                  key=lambda e: e["client"])
+    jetzt = time.time() if jetzt is None else jetzt
+    merk = _ZULETZT_AKTIV if gedaechtnis is None else gedaechtnis
+    ergebnis = []
+    gesehen = set()
+    for e in eintraege:
+        client = e["client"]
+        gesehen.add(client)
+        if arbeitet(e):
+            merk[client] = jetzt
+            ergebnis.append(dict(e, aktiv=True))
+        elif (e["state"] == "waiting" and client in merk
+              and jetzt - merk[client] <= NACHLAUF):
+            ergebnis.append(dict(e, aktiv=True))
+    for client in list(merk):
+        if client not in gesehen or jetzt - merk[client] > NACHLAUF:
+            del merk[client]
+    return sorted(ergebnis, key=lambda e: e["client"])
 
 
 def karten(eigen, fremde, cfg=None):
@@ -422,7 +479,10 @@ def karten(eigen, fremde, cfg=None):
         # 30.08.2026 stand neben einem untaetigen Antigravity ein
         # Zaehler von 19,2 Stunden. Eine Zahl, die niemand erklaeren
         # kann, ist schlechter als keine.
-        laeuft = eintrag["state"] == "working"
+        # aktive() markiert, wen es fuer arbeitend haelt -- auch in der
+        # Nachlauffrist. Sonst verschwaende der Zaehler fuer die Dauer
+        # der Frist und kaeme danach wieder.
+        laeuft = bool(eintrag.get("aktiv")) or arbeitet(eintrag)
         for zeile in zeilen_von(zeilen_sitzung(eintrag, cfg)):
             ergebnis.append({
                 "client": eintrag["client"],

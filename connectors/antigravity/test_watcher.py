@@ -57,6 +57,27 @@ class TestAntigravityConnector(unittest.TestCase):
         self.assertIsNone(parse_modell_name(None))
         self.assertIsNone(parse_modell_name(""))
 
+    def test_model_parser_kennt_keine_liste(self):
+        """Ein neues Modell erkennt sich selbst; Sonderzeichen fliegen raus."""
+        self.assertEqual(
+            parse_modell_name("<USER_SETTINGS_CHANGE>The user changed setting "
+                              "Model Selection from Gemini 3 Pro to Astra 6"
+                              "</USER_SETTINGS_CHANGE>"),
+            "Astra 6")
+        self.assertEqual(parse_modell_name("changed Model Selection to Gemini 4.1 Ultra (Max)."),
+                         "Gemini 4.1 Ultra")
+        self.assertIsNone(parse_modell_name("changed Model Selection to C:/geheim/x.py"))
+        self.assertIsNone(parse_modell_name("changed Model Selection to " + "x" * 50))
+
+    def test_unlesbares_modell_loescht_den_alten_wert(self):
+        watcher = AntigravityWatcher()
+        watcher.aktuelles_modell = "Gemini 3 Pro"
+        watcher.verarbeite_zeile(json.dumps({
+            "type": "SYSTEM_MESSAGE", "source": "SYSTEM",
+            "content": "<USER_SETTINGS_CHANGE>The user changed setting Model "
+                       "Selection from Gemini 3 Pro to ???</USER_SETTINGS_CHANGE>"}))
+        self.assertIsNone(watcher.aktuelles_modell)
+
     def test_beacon_schema_with_null_model(self):
         """Prueft, dass ein ungesetzter Modellname (None/null) voellig valide ist."""
         watcher = AntigravityWatcher()

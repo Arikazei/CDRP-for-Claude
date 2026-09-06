@@ -278,10 +278,23 @@ class Karussell(unittest.TestCase):
              "zeilen": ["using cowork with Opus", "5h: 40%",
                         "Abonnement: Max (5x)"]}
 
-    def test_nur_working_zaehlt_als_aktiv(self):
-        a = eintrag(client="codex", state="waiting", updated_at=9999)
+    def aktive(self, eintraege, jetzt=1000, merk=None):
+        # Jeder Test bekommt ein eigenes Gedaechtnis; das Modul-Gedaechtnis
+        # wuerde sonst Arbeit aus einem Test in den naechsten tragen.
+        return [e["client"] for e in
+                beacons.aktive(eintraege, jetzt, {} if merk is None else merk)]
+
+    def test_wartender_ohne_vorgeschichte_zaehlt_nicht(self):
+        a = eintrag(client="codex", state="waiting", action="idle",
+                    updated_at=9999)
         b = eintrag(client="antigravity", state="idle", action="idle")
-        self.assertEqual(beacons.aktive([a, b]), [])
+        self.assertEqual(self.aktive([a, b]), [])
+
+    def test_ein_arbeiter_ein_untaetiger_nur_der_arbeiter(self):
+        arbeitend = eintrag(client="codex", state="working")
+        untaetig = eintrag(client="claude", state="waiting", action="thinking",
+                           updated_at=9999)
+        self.assertEqual(self.aktive([arbeitend, untaetig]), ["codex"])
 
     def test_mehrere_arbeitende_kommen_alle_dran(self):
         # Der Kern der Fehler vom 22.08.: erst gewann der haeufigste
@@ -289,23 +302,94 @@ class Karussell(unittest.TestCase):
         # nie zu sehen, obwohl er arbeitete. Jetzt sind beide dabei.
         codex = eintrag(client="codex", state="working", updated_at=100)
         claude = eintrag(client="claude", state="working", updated_at=999)
-        self.assertEqual([e["client"] for e in beacons.aktive([codex, claude])],
-                         ["claude", "codex"])
+        self.assertEqual(self.aktive([codex, claude]), ["claude", "codex"])
 
     def test_reihenfolge_haengt_nicht_am_zeitstempel(self):
         # Sonst huepfte die Anzeige zufaellig, weil der Wechsel an der
         # Uhrzeit haengt und die Liste sich staendig umsortieren wuerde.
         a = eintrag(client="codex", state="working", updated_at=999)
         b = eintrag(client="antigravity", state="working", updated_at=1)
-        self.assertEqual([e["client"] for e in beacons.aktive([a, b])],
-                         ["antigravity", "codex"])
+        self.assertEqual(self.aktive([a, b]), ["antigravity", "codex"])
 
     def test_wartender_verdraengt_keinen_arbeitenden(self):
-        wartend = eintrag(client="antigravity", state="waiting",
+        wartend = eintrag(client="antigravity", state="waiting", action="idle",
                           updated_at=9999)
         arbeitend = eintrag(client="codex", state="working", updated_at=1)
-        self.assertEqual([e["client"] for e in beacons.aktive([wartend, arbeitend])],
+        self.assertEqual(self.aktive([wartend, arbeitend]), ["codex"])
+
+    def test_keiner_arbeitet_dann_alle_offenen(self):
+        # Die aktive Menge ist leer; der Aufrufer nimmt dann alle.
+        alle = [eintrag(client="codex", state="waiting", action="idle"),
+                eintrag(client="antigravity", state="idle", action="idle")]
+        self.assertEqual(self.aktive(alle), [])
+        liste = beacons.karten(self.EIGEN, alle)
+        self.assertEqual(sorted({k["client"] for k in liste}),
+                         ["antigravity", "claude", "codex"])
+
+    def test_nachlauf_haelt_und_laeuft_ab(self):
+        # Gemessen am 06.09.2026: Codex fiel zwischen zwei Hook-Ereignissen
+        # fuer eine Sekunde auf "waiting", und Claude, der nur wartete,
+        # stand in der Presence. Innerhalb der Frist bleibt Codex; danach
+        # -- und das ist der Punkt, an dem 1.6.2 scheiterte -- faellt er
+        # heraus.
+        merk = {}
+        claude = eintrag(client="claude", state="waiting", action="thinking",
+                         updated_at=9999)
+        arbeitend = eintrag(client="codex", state="working", updated_at=1000)
+        self.assertEqual(self.aktive([arbeitend, claude], 1000, merk),
                          ["codex"])
+        wartend = eintrag(client="codex", state="waiting", action="idle",
+                          updated_at=1001)
+        self.assertEqual(self.aktive([wartend, claude], 1001, merk), ["codex"])
+        self.assertEqual(self.aktive([wartend, claude],
+                                     1000 + beacons.NACHLAUF, merk), ["codex"])
+        self.assertEqual(self.aktive([wartend, claude],
+                                     1001 + beacons.NACHLAUF, merk), [])
+        self.assertNotIn("codex", merk)
+
+    def test_nachlauf_beginnt_erst_nach_arbeit(self):
+        merk = {}
+        wartend = eintrag(client="codex", state="waiting", action="idle",
+                          updated_at=1000)
+        self.assertEqual(self.aktive([wartend], 1000, merk), [])
+        self.assertEqual(self.aktive([wartend], 1005, merk), [])
+
+    def test_leerlauf_beendet_den_nachlauf_sofort(self):
+        merk = {}
+        self.assertEqual(self.aktive([eintrag(client="codex")], 1000, merk),
+                         ["codex"])
+        ruhend = eintrag(client="codex", state="idle", action="idle")
+        self.assertEqual(self.aktive([ruhend], 1002, merk), [])
+
+    def test_nachlauf_wird_durch_neue_arbeit_verlaengert(self):
+        merk = {}
+        self.aktive([eintrag(client="codex")], 1000, merk)
+        self.aktive([eintrag(client="codex")], 1020, merk)
+        wartend = eintrag(client="codex", state="waiting", action="idle")
+        self.assertEqual(self.aktive([wartend], 1040, merk), ["codex"])
+        self.assertEqual(self.aktive([wartend], 1046, merk), [])
+
+    def test_genehmigungsfrage_zaehlt_als_aktiv(self):
+        # Der Agent wartet auf den Nutzer -- der Moment groesster
+        # Aufmerksamkeit, nicht Leerlauf. Auch ohne Vorgeschichte.
+        frage = eintrag(client="codex", state="waiting",
+                        action="waiting_approval")
+        claude = eintrag(client="claude", state="waiting", action="thinking",
+                         updated_at=9999)
+        self.assertEqual(self.aktive([frage, claude]), ["codex"])
+        karte = beacons.karten(None, beacons.aktive([frage], 1000, {}))[0]
+        self.assertEqual(karte["details"], "OpenAI Codex · waiting for approval")
+        self.assertTrue(karte["aktiv"])
+        self.assertEqual(karte["start"], 1000)
+
+    def test_zaehler_bleibt_in_der_nachlauffrist(self):
+        merk = {}
+        beacons.aktive([eintrag(client="codex")], 1000, merk)
+        wartend = eintrag(client="codex", state="waiting", action="idle",
+                          session_start=777)
+        karte = beacons.karten(None, beacons.aktive([wartend], 1010, merk))[0]
+        self.assertEqual(karte["start"], 777)
+        self.assertTrue(karte["aktiv"])
 
     def test_volle_runde_durch_alle_clients(self):
         fremde = [

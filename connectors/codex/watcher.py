@@ -24,7 +24,7 @@ sys.path.insert(0, HIER)
 
 from codex_beacon import (  # noqa: E402
     CLIENT, DISPLAY_NAME, atomic_json, beacon_paths, load_state,
-    load_window, window_path,
+    load_window, model_label, window_path,
 )
 
 # Prozessnamen der Codex-App. ChatGPT.exe ist das Fenster, codex.exe der
@@ -178,7 +178,9 @@ def ruhe_beacon(zustand, jetzt):
         "display_name": DISPLAY_NAME,
         "state": "idle",
         "action": "idle",
-        "model": (zustand or {}).get("model"),
+        # Durch dieselbe Pruefung wie im Hook: der Zustandsspeicher ist
+        # eine Datei, und was darin steht, gilt nicht ungeprueft.
+        "model": model_label((zustand or {}).get("model")),
         "session_start": None,
         "updated_at": int(jetzt),
         "file_kind": None,
@@ -220,6 +222,7 @@ def schritt():
         # Uhrzeit. Inhaltlich wird nichts erfunden -- es bleibt exakt
         # das, was der letzte Hook gemeldet hat.
         daten = dict(zustand)
+        daten["model"] = model_label(daten.get("model"))
         daten["updated_at"] = int(jetzt)
         daten.update(load_window(int(jetzt)))
         atomic_json(beacon_pfad, daten)

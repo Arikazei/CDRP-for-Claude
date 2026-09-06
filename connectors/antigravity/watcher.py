@@ -90,6 +90,10 @@ ENDUNG_ZU_DATEIART = {
     ".xml": "data", ".proto": "data", ".pb": "data", ".db": "data", ".sqlite": "data", ".sqlite3": "data",
 }
 
+# Modellnamen: dasselbe Tor wie bei Claude und Codex. Nur Buchstaben,
+# Ziffern, Punkt, Bindestrich, Unterstrich, Leerzeichen; hoechstens 40.
+RE_MODELL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{1,39}$")
+
 # Regex zur Erkennung von Test-Befehlen bei run_command
 RE_TEST_BEFEHL = re.compile(
     r"(?:npm\s+(?:run\s+)?test|pytest|cargo\s+test|go\s+test|dotnet\s+test|python\s+-m\s+unittest|vitest|jest)",
@@ -200,14 +204,16 @@ def parse_modell_name(text: Optional[str]) -> Optional[str]:
     zieltext = text
     if " to " in text:
         zieltext = text.split(" to ", 1)[1]
-    
-    text_low = zieltext.lower()
-    if "flash" in text_low:
-        return "Gemini 3.7 Flash"
-    if "pro" in text_low:
-        return "Gemini 3 Pro"
-    if "gemini" in text_low:
-        return "Gemini"
+    # "(High)" ist die Denkstufe, "<...>" der Rahmen der Systemmeldung --
+    # beides gehoert nicht zum Namen.
+    for trenner in ("(", "<"):
+        zieltext = zieltext.split(trenner, 1)[0]
+    zieltext = zieltext.strip().rstrip(".")
+    # Keine Liste bekannter Namen mehr: ein neues Modell soll sich
+    # selbst erkennen. Das Muster laesst nur Zeichen durch, aus denen
+    # sich kein Satz bauen laesst; alles andere wird verworfen.
+    if RE_MODELL.match(zieltext):
+        return zieltext
     return None
 
 
@@ -420,9 +426,8 @@ class AntigravityWatcher:
         if schritt_typ in ("SYSTEM_MESSAGE", "EPHEMERAL_MESSAGE"):
             content = obj.get("content")
             if isinstance(content, str) and "Model Selection" in content:
-                parsed_m = parse_modell_name(content)
-                if parsed_m:
-                    self.aktuelles_modell = parsed_m
+                # Auch None uebernehmen: ein alter Wert bleibt nicht stehen.
+                self.aktuelles_modell = parse_modell_name(content)
 
         self.letzte_transkript_zeit = time.time()
 

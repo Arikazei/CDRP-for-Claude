@@ -93,8 +93,10 @@ laufen. `SessionEnd` kann laut Codex-Lebenszyklus zeitversetzt eintreffen;
 
 ## Was gelesen wird, was nicht
 
-Aus der Hook-Nutzlast: `hook_event_name`, `tool_name`, `model` (nur gegen
-eine feste Tabelle bekannter Modelle), aus `tool_input` nur die Endung
+Aus der Hook-Nutzlast: `hook_event_name`, `tool_name`, `model` (nur, wenn
+der Wert das Muster fuer Modellnamen besteht -- Buchstaben, Ziffern, Punkt,
+Bindestrich, Unterstrich, Leerzeichen, hoechstens 40 Zeichen; sonst `None`,
+nie der alte Wert), aus `tool_input` nur die Endung
 expliziter Pfadfelder und bei `apply_patch` die Endung aus der Kopfzeile.
 `prompt`, `cwd`, `session_id`, `transcript_path` und Befehle liegen in
 derselben Nutzlast und werden verworfen; ein Befehl wird nur daraufhin

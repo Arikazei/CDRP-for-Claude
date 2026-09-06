@@ -262,8 +262,9 @@ Tätigkeit, Dateiart, Auslastung in Prozent und die Abo-Bezeichnung.
   Wochen- und Modell-Limits – der Balken für das Nutzungsguthaben und der
   ausgegebene Betrag bleiben ausdrücklich außen vor.
 - **Codex-Hooks**: die Nutzlast, die Codex jedem Hook übergibt. Ausgewertet
-  werden `hook_event_name`, `tool_name`, `model` (nur gegen eine feste Tabelle
-  bekannter Modelle) und die Endung expliziter Pfadfelder. Prompt,
+  werden `hook_event_name`, `tool_name`, `model` (nur, wenn der Wert wie ein
+  Modellname aussieht: Buchstaben, Ziffern, Punkt, Bindestrich, Unterstrich,
+  Leerzeichen, höchstens 40 Zeichen) und die Endung expliziter Pfadfelder. Prompt,
   Arbeitsverzeichnis, Sitzungskennung und Transkriptpfad liegen in derselben
   Nutzlast und werden verworfen.
 - **Antigravity**: `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`.
