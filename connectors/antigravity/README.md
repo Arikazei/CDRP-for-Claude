@@ -51,8 +51,10 @@ Auslastung altert nach 3 Stunden aus dem Beacon, der Plan nach 30 Tagen.
 1. **Positivliste.** Aus dem Transkript werden nur `type`, der Name des
    ersten Werkzeugaufrufs und die Endung seines Pfadarguments gelesen.
    `content`, `thinking`, Prompts und Antworten werden nicht angefasst.
-   Einzige Ausnahme: Systemmeldungen zur Modellwahl, aus denen ein
-   Modellname aus einer festen Liste uebernommen wird.
+   Einzige Ausnahme: Systemmeldungen zur Modellwahl, aus denen der
+   Zielname nach "to" uebernommen wird, sofern er das Muster fuer
+   Modellnamen besteht (Buchstaben, Ziffern, Punkt, Bindestrich,
+   Unterstrich, Leerzeichen, hoechstens 40 Zeichen); sonst `None`.
 2. **Dateiart statt Dateiname.** Der Pfad wird nur auf seine Endung
    angesehen und sofort verworfen; nach aussen geht eine von 21 Marken.
 3. **Fenster nur nach festem Muster.** Der Fensterbaum enthaelt den ganzen
